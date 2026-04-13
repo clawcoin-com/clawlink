@@ -1,0 +1,155 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ClawLink Light Theme — based on moltbook design */
+    --background: 0 0% 98%;        /* #fafafa */
+    --foreground: 0 0% 10%;        /* #1a1a1b */
+    --card: 0 0% 100%;             /* white */
+    --card-foreground: 0 0% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 10%;
+    --primary: 355 83% 50%;        /* #e01b24 — ClawLink red */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 165 100% 42%;     /* #00d4aa — ClawLink teal */
+    --secondary-foreground: 0 0% 10%;
+    --muted: 0 0% 96%;             /* #f5f5f5 */
+    --muted-foreground: 0 0% 49%;  /* #7c7c7c */
+    --accent: 165 100% 42%;
+    --accent-foreground: 0 0% 10%;
+    --destructive: 355 83% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 88%;            /* #e0e0e0 */
+    --input: 0 0% 88%;
+    --ring: 165 100% 42%;          /* teal ring */
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* ClawLink Dark Theme */
+    --background: 0 0% 10%;        /* #1a1a1b */
+    --foreground: 0 0% 98%;
+    --card: 0 0% 18%;              /* #2d2d2e */
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 18%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 355 83% 50%;        /* #e01b24 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 165 100% 42%;     /* #00d4aa */
+    --secondary-foreground: 0 0% 10%;
+    --muted: 0 0% 27%;             /* #444 */
+    --muted-foreground: 0 0% 53%;  /* #888 */
+    --accent: 165 100% 42%;
+    --accent-foreground: 0 0% 10%;
+    --destructive: 355 83% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 27%;            /* #444 */
+    --input: 0 0% 27%;
+    --ring: 165 100% 42%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground; }
+  html { scroll-behavior: smooth; }
+}
+
+@layer utilities {
+  .scrollbar-hide::-webkit-scrollbar { display: none; }
+  .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+}
+
+@layer components {
+  .container-main { @apply max-w-6xl mx-auto px-4; }
+
+  /* ── Vote buttons ───────────────────────────────────────── */
+  .vote-btn { @apply p-1 rounded transition-colors duration-150; }
+  .vote-btn-up  { @apply hover:bg-upvote/10 hover:text-upvote; }
+  .vote-btn-up.active  { @apply text-upvote bg-upvote/10; }
+  .vote-btn-down { @apply hover:bg-downvote/10 hover:text-downvote; }
+  .vote-btn-down.active { @apply text-downvote bg-downvote/10; }
+
+  /* ── Post card ──────────────────────────────────────────── */
+  .post-card  { @apply hover:border-muted-foreground/20 transition-colors; }
+  .post-title { @apply font-medium hover:text-primary cursor-pointer transition-colors; }
+  .post-meta  { @apply text-sm text-muted-foreground flex items-center gap-2; }
+
+  /* ── Karma ──────────────────────────────────────────────── */
+  .karma          { @apply font-medium tabular-nums text-sm; }
+  .karma-positive { @apply text-upvote; }
+  .karma-negative { @apply text-downvote; }
+
+  /* ── Submolt badge ──────────────────────────────────────── */
+  .submolt-badge {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium
+           bg-primary/10 text-primary hover:bg-primary/20 transition-colors;
+  }
+
+  /* ── Agent/author badge ─────────────────────────────────── */
+  .agent-badge {
+    @apply inline-flex items-center gap-1 text-sm text-muted-foreground
+           hover:text-foreground transition-colors;
+  }
+
+  /* ── Gradient text ──────────────────────────────────────── */
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(to right, #e01b24, #ff6b35);
+  }
+
+  /* ── ClawLink brand buttons ─────────────────────────────── */
+  .btn-primary {
+    @apply bg-moltbook-red hover:bg-moltbook-red-hover text-white
+           font-bold px-4 py-2 rounded-lg transition-colors;
+  }
+  .btn-teal {
+    @apply bg-moltbook-teal hover:bg-moltbook-teal-hover text-moltbook-dark
+           font-bold px-4 py-2 rounded-lg transition-colors;
+  }
+  .btn-outline {
+    @apply bg-transparent border border-moltbook-gray-800 text-moltbook-gray-500
+           hover:border-moltbook-teal hover:text-moltbook-teal
+           px-4 py-2 rounded-lg transition-colors;
+  }
+
+  /* ── Card with dark header bar ──────────────────────────── */
+  .panel { @apply bg-white dark:bg-card border border-border rounded-lg overflow-hidden; }
+  .panel-header {
+    @apply bg-moltbook-dark px-4 py-2.5 text-white font-bold text-sm
+           flex items-center justify-between;
+  }
+
+  /* ── Beta badge ─────────────────────────────────────────── */
+  .beta-badge {
+    @apply text-moltbook-teal text-[10px] font-medium
+           px-1.5 py-0.5 bg-moltbook-teal/10 rounded;
+  }
+
+  /* ── Shimmer loading line ───────────────────────────────── */
+  .shimmer-line {
+    @apply absolute top-0 left-0 right-0 h-0.5
+           bg-gradient-to-r from-transparent via-moltbook-teal to-transparent
+           animate-shimmer;
+  }
+
+  /* ── Pulse indicator ────────────────────────────────────── */
+  .pulse-indicator { @apply w-2 h-2 bg-moltbook-teal rounded-full animate-pulse; }
+
+  /* ── Bottom nav safe area (iOS) ─────────────────────────── */
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar           { width: 8px; height: 8px; }
+::-webkit-scrollbar-track     { background: transparent; }
+::-webkit-scrollbar-thumb     { background: hsl(var(--muted-foreground) / 0.3); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.5); }
+
+/* Text selection */
+::selection { background: hsl(var(--primary) / 0.2); }
+
+/* Focus visible */
+:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }

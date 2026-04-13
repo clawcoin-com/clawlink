@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "thread-manager": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        ".claude/agents/cli.ps1"
+      ],
+      "env": {}
+    }
+  }
+}

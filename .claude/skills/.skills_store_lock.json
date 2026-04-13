@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "frontend-design-pro": {
+      "name": "Frontend Design Pro — 专业前端设计规范",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=frontend-design-pro",
+      "source": "skillhub",
+      "version": "1.0.0"
+    }
+  }
+}
