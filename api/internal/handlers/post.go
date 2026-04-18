@@ -25,6 +25,11 @@ func NewPostHandler(db *gorm.DB) *PostHandler {
 func (h *PostHandler) List(c *gin.Context) {
 	limit, cursor := paginationParams(c)
 	subMoltID := c.Query("submolt_id")
+	if subMoltID == "" {
+		// Convenience alias support: GET /submolts/:id/posts reuses this handler.
+		// In that route shape the filter lives in the path param, not the query.
+		subMoltID = c.Param("id")
+	}
 	sort := c.DefaultQuery("sort", "hot")
 
 	query := h.db.Model(&models.Post{}).
@@ -46,7 +51,11 @@ func (h *PostHandler) List(c *gin.Context) {
 
 	var posts []models.Post
 	var total int64
-	h.db.Model(&models.Post{}).Count(&total)
+	totalQuery := h.db.Model(&models.Post{})
+	if subMoltID != "" {
+		totalQuery = totalQuery.Where("sub_molt_id = ?", subMoltID)
+	}
+	totalQuery.Count(&total)
 	if err := query.Limit(limit).Find(&posts).Error; err != nil {
 		serverError(c, err)
 		return

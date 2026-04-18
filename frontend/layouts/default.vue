@@ -28,6 +28,8 @@ onMounted(() => authStore.hydrate())
           <LayoutRightSidebar class="hidden lg:block w-64 flex-shrink-0" />
         </div>
       </div>
+
+      <LayoutAppFooter />
     </div>
 
     <!-- Mobile bottom nav -->

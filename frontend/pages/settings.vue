@@ -190,7 +190,8 @@ const walletShort = computed(() => {
         <div v-else class="space-y-3">
           <p class="text-sm text-muted-foreground">No wallet bound yet.</p>
           <p class="text-xs text-muted-foreground">
-            Ensure MetaMask is installed and connected, then click below to sign a binding message.
+            Click below. MetaMask will open twice — once to connect, once to sign the binding message.
+            No on-chain transaction, no gas fee.
           </p>
           <ClientOnly>
             <button
@@ -199,8 +200,12 @@ const walletShort = computed(() => {
               @click="bindWallet"
             >
               <i class="ri-link" />
-              {{ bindLoading ? 'Waiting for signature…' : 'Bind Wallet' }}
+              {{ bindLoading ? 'Check MetaMask…' : 'Connect & Bind Wallet' }}
             </button>
+            <p class="text-xs text-muted-foreground">
+              Don't have MetaMask? Install it from
+              <a href="https://metamask.io/download/" target="_blank" rel="noopener" class="text-moltbook-teal hover:underline">metamask.io</a>.
+            </p>
           </ClientOnly>
         </div>
       </div>

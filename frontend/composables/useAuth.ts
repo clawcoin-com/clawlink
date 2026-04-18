@@ -1,6 +1,6 @@
 // useAuth — email/password + OAuth login; SIWE used only for wallet binding.
-import { useAccount, useSignMessage, useDisconnect } from '@wagmi/vue'
-import { wagmiConfig } from '~/plugins/wagmi.client'
+import { useAccount, useConnect, useSignMessage, useDisconnect } from '@wagmi/vue'
+import { wagmiConfig } from '~/plugins/wagmi'
 import type { User } from '~/types/api'
 
 export function useAuth() {
@@ -10,6 +10,7 @@ export function useAuth() {
   const config = useRuntimeConfig()
 
   const { address, isConnected } = useAccount({ config: wagmiConfig })
+  const { connectAsync, connectors } = useConnect({ config: wagmiConfig })
   const { signMessageAsync } = useSignMessage({ config: wagmiConfig })
   const { disconnect } = useDisconnect({ config: wagmiConfig })
 
@@ -69,37 +70,52 @@ export function useAuth() {
     }
     loading.value = true
     try {
-      // Ensure MetaMask is connected.
+      // 1. Auto-trigger MetaMask connect if not yet connected. This opens the
+      //    MetaMask popup to request account access from the user.
+      //    Note: `connectors` from useConnect() is a plain array (already
+      //    unwrapped internally — see @wagmi/vue useConnect.js), NOT a ref.
       if (!isConnected.value) {
-        ui.toast('info', 'Open MetaMask and connect your wallet first')
-        return
+        const list = connectors ?? []
+        const metaMask = list.find(c => c.id === 'metaMaskSDK' || c.id === 'metaMask')
+        if (!metaMask) {
+          throw new Error('MetaMask not detected. Please install the MetaMask browser extension.')
+        }
+        ui.toast('info', 'Approve the MetaMask connection request…')
+        await connectAsync({ connector: metaMask })
       }
 
       const wallet = address.value?.toLowerCase()
-      if (!wallet) throw new Error('Wallet address not available')
+      if (!wallet) throw new Error('Wallet address not available after connecting')
 
-      // Get SIWE nonce from the binding endpoint.
-      const { nonce, message } = await api.get<{ nonce: string; message: string }>(
+      // 2. Ask the backend for a SIWE nonce + the exact message to sign.
+      const { message } = await api.get<{ nonce: string; message: string; wallet: string }>(
         `/auth/wallet/nonce?wallet=${wallet}`
       )
 
-      // Sign with MetaMask.
+      // 3. Open MetaMask again to sign the message (EIP-191 personal_sign).
+      ui.toast('info', 'Sign the binding message in MetaMask…')
       const signature = await signMessageAsync({ message })
 
-      // Submit binding.
+      // 4. Submit { wallet, signature, message } to complete binding.
       const data = await api.post<{ wallet_address: string }>('/auth/wallet/bind', {
         wallet,
         signature,
         message,
       })
 
-      // Refresh user profile so wallet_address appears immediately.
+      // 5. Refresh user profile so wallet_address appears immediately.
       const updatedUser = await api.get<User>('/users/me')
       authStore.setAuth(authStore.token!, updatedUser)
 
-      ui.toast('success', `Wallet ${data.wallet_address.slice(0, 8)}… bound successfully`)
+      ui.toast('success', `Wallet ${data.wallet_address.slice(0, 10)}… bound successfully`)
     } catch (err: any) {
-      ui.toast('error', err?.message ?? 'Wallet binding failed')
+      // Common wagmi/MetaMask user-reject codes; surface a friendlier message.
+      const msg = err?.shortMessage || err?.message || 'Wallet binding failed'
+      if (msg.includes('User rejected') || msg.includes('user rejected')) {
+        ui.toast('info', 'Cancelled')
+      } else {
+        ui.toast('error', msg)
+      }
     } finally {
       loading.value = false
     }

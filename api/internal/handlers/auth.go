@@ -20,6 +20,7 @@ import (
 	"github.com/clawcoin-com/clawlink/internal/shared"
 	"github.com/decred/dcrd/dcrec/secp256k1/v4/ecdsa"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/sha3"
 	"gorm.io/gorm"
@@ -158,9 +159,10 @@ func (h *AuthHandler) VerifyEmail(c *gin.Context) {
 		return
 	}
 
-	// Redirect frontend to the callback page with the JWT.
+	// Redirect frontend with a short-lived one-time code, not the JWT itself.
 	frontendURL := config.App.FrontendURL
-	redirectURL := fmt.Sprintf("%s/auth/callback?token=%s", frontendURL, url.QueryEscape(jwt))
+	code := issueAuthCode(jwt)
+	redirectURL := fmt.Sprintf("%s/auth/callback?code=%s", frontendURL, url.QueryEscape(code))
 	c.Redirect(http.StatusFound, redirectURL)
 }
 
@@ -171,6 +173,18 @@ var oauthState = struct {
 	sync.Mutex
 	m map[string]time.Time
 }{m: make(map[string]time.Time)}
+
+var authCodeStore = struct {
+	sync.Mutex
+	m map[string]authCodeEntry
+}{m: make(map[string]authCodeEntry)}
+
+type authCodeEntry struct {
+	JWT     string
+	Expires time.Time
+}
+
+const authCodeTTL = 60 * time.Second
 
 func issueOAuthState() string {
 	state := newToken()
@@ -191,6 +205,26 @@ func consumeOAuthState(state string) bool {
 	return true
 }
 
+func issueAuthCode(jwt string) string {
+	code := newToken()
+	authCodeStore.Lock()
+	authCodeStore.m[code] = authCodeEntry{JWT: jwt, Expires: time.Now().Add(authCodeTTL)}
+	authCodeStore.Unlock()
+	return code
+}
+
+func consumeAuthCode(code string) (string, bool) {
+	authCodeStore.Lock()
+	defer authCodeStore.Unlock()
+	entry, ok := authCodeStore.m[code]
+	if !ok || time.Now().After(entry.Expires) {
+		delete(authCodeStore.m, code)
+		return "", false
+	}
+	delete(authCodeStore.m, code)
+	return entry.JWT, true
+}
+
 func init() {
 	// Purge expired OAuth states every 5 minutes.
 	go func() {
@@ -202,6 +236,14 @@ func init() {
 				}
 			}
 			oauthState.Unlock()
+
+			authCodeStore.Lock()
+			for k, v := range authCodeStore.m {
+				if time.Now().After(v.Expires) {
+					delete(authCodeStore.m, k)
+				}
+			}
+			authCodeStore.Unlock()
 		}
 	}()
 }
@@ -266,10 +308,11 @@ func (h *AuthHandler) OAuthCallback(c *gin.Context) {
 	}
 
 	var (
-		oauthID string
-		email   string
-		name    string
-		avatar  string
+		oauthID       string
+		email         string
+		name          string
+		avatar        string
+		emailVerified bool
 	)
 
 	cfg := config.App
@@ -289,9 +332,17 @@ func (h *AuthHandler) OAuthCallback(c *gin.Context) {
 			serverError(c, err)
 			return
 		}
-		oauthID = info["sub"].(string)
+		sub, ok := info["sub"].(string)
+		if !ok || strings.TrimSpace(sub) == "" {
+			serverError(c, fmt.Errorf("google userinfo missing sub"))
+			return
+		}
+		oauthID = sub
 		if e, ok := info["email"].(string); ok {
 			email = strings.ToLower(e)
+		}
+		if v, ok := info["email_verified"].(bool); ok {
+			emailVerified = v
 		}
 		if n, ok := info["name"].(string); ok {
 			name = n
@@ -311,9 +362,17 @@ func (h *AuthHandler) OAuthCallback(c *gin.Context) {
 			serverError(c, err)
 			return
 		}
-		oauthID = info["id"].(string)
+		id, ok := info["id"].(string)
+		if !ok || strings.TrimSpace(id) == "" {
+			serverError(c, fmt.Errorf("discord userinfo missing id"))
+			return
+		}
+		oauthID = id
 		if e, ok := info["email"].(string); ok {
 			email = strings.ToLower(e)
+		}
+		if v, ok := info["verified"].(bool); ok {
+			emailVerified = v
 		}
 		if n, ok := info["username"].(string); ok {
 			name = n
@@ -328,7 +387,7 @@ func (h *AuthHandler) OAuthCallback(c *gin.Context) {
 	}
 
 	// Find or create user.
-	user, err := h.findOrCreateOAuthUser(provider, oauthID, email, name, avatar)
+	user, err := h.findOrCreateOAuthUser(provider, oauthID, email, name, avatar, emailVerified)
 	if err != nil {
 		serverError(c, err)
 		return
@@ -340,11 +399,12 @@ func (h *AuthHandler) OAuthCallback(c *gin.Context) {
 		return
 	}
 
-	redirectURL := fmt.Sprintf("%s/auth/callback?token=%s", cfg.FrontendURL, url.QueryEscape(token))
+	redirectCode := issueAuthCode(token)
+	redirectURL := fmt.Sprintf("%s/auth/callback?code=%s", cfg.FrontendURL, url.QueryEscape(redirectCode))
 	c.Redirect(http.StatusFound, redirectURL)
 }
 
-func (h *AuthHandler) findOrCreateOAuthUser(provider, oauthID, email, name, avatar string) (*models.User, error) {
+func (h *AuthHandler) findOrCreateOAuthUser(provider, oauthID, email, name, avatar string, providerEmailVerified bool) (*models.User, error) {
 	// 1. Try to find by (provider, oauth_id).
 	var user models.User
 	if h.db.Where("oauth_provider = ? AND oauth_id = ?", provider, oauthID).First(&user).Error == nil {
@@ -352,7 +412,7 @@ func (h *AuthHandler) findOrCreateOAuthUser(provider, oauthID, email, name, avat
 	}
 
 	// 2. Try to find by email (link existing account).
-	if email != "" {
+	if email != "" && providerEmailVerified {
 		if h.db.Where("email = ?", email).First(&user).Error == nil {
 			// Link OAuth to existing account.
 			h.db.Model(&user).Updates(map[string]any{
@@ -370,7 +430,7 @@ func (h *AuthHandler) findOrCreateOAuthUser(provider, oauthID, email, name, avat
 		displayName = randomUsername()
 	}
 	emailPtr := (*string)(nil)
-	if email != "" {
+	if email != "" && providerEmailVerified {
 		emailPtr = &email
 	}
 	user = models.User{
@@ -379,7 +439,7 @@ func (h *AuthHandler) findOrCreateOAuthUser(provider, oauthID, email, name, avat
 		DisplayName:   displayName,
 		Avatar:        avatar,
 		Email:         emailPtr,
-		EmailVerified: true, // OAuth emails are pre-verified by the provider
+		EmailVerified: providerEmailVerified,
 		OAuthProvider: provider,
 		OAuthID:       oauthID,
 		Metadata:      shared.JSON("{}"),
@@ -387,6 +447,25 @@ func (h *AuthHandler) findOrCreateOAuthUser(provider, oauthID, email, name, avat
 		UpdatedAt:     time.Now(),
 	}
 	return &user, h.db.Create(&user).Error
+}
+
+// ExchangeAuthCode burns a short-lived one-time code and returns the freshly
+// minted JWT. This keeps JWTs out of browser-visible URLs.
+// POST /api/v1/auth/exchange
+func (h *AuthHandler) ExchangeAuthCode(c *gin.Context) {
+	var body struct {
+		Code string `json:"code" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		badRequest(c, "code is required")
+		return
+	}
+	token, found := consumeAuthCode(strings.TrimSpace(body.Code))
+	if !found {
+		c.JSON(http.StatusUnauthorized, shared.Fail("INVALID_CODE", "auth code expired or already used"))
+		return
+	}
+	ok(c, gin.H{"token": token})
 }
 
 // ─── Wallet Binding ───────────────────────────────────────────────────────────
@@ -578,6 +657,205 @@ func (h *AuthHandler) RevokeAPIKey(c *gin.Context) {
 	})
 }
 
+// ─── Agent registration (one-shot, no JWT required) ─────────────────────────
+
+// RegisterAgentChallenge issues a short-lived stateless challenge for wallet-based
+// agent registration. The client signs the returned `message` with their wallet
+// private key, then submits {wallet, challenge, signature} to POST /auth/register-agent.
+//
+// GET /api/v1/auth/register-agent/nonce?wallet=0x...
+func (h *AuthHandler) RegisterAgentChallenge(c *gin.Context) {
+	wallet := strings.ToLower(strings.TrimSpace(c.Query("wallet")))
+	if !isValidEVMAddress(wallet) {
+		badRequest(c, "wallet query param must be a 0x-prefixed 40-hex-char EVM address")
+		return
+	}
+
+	// Reject early if the wallet is already bound to any account.
+	var existing models.User
+	if h.db.Where("wallet_address = ?", wallet).First(&existing).Error == nil {
+		c.JSON(http.StatusConflict, shared.Fail("WALLET_TAKEN", "this wallet is already registered — nothing to do"))
+		return
+	}
+
+	nonce := newNonce()
+	msg := siweRegisterAgentMessage(wallet, nonce)
+	challenge, err := issueAgentChallenge(wallet, nonce)
+	if err != nil {
+		serverError(c, err)
+		return
+	}
+
+	ok(c, gin.H{
+		"challenge":       challenge,
+		"message":         msg,
+		"expires_in_secs": int(agentChallengeTTL.Seconds()),
+		"instructions":    "Sign `message` with your wallet (EIP-191 personal_sign), then POST {wallet, challenge, signature} to /auth/register-agent.",
+	})
+}
+
+// RegisterAgent creates a new agent account in one shot. Two auth paths are
+// supported — clients pick ONE:
+//
+//   - **Wallet (recommended)**: {wallet, challenge, signature}
+//     The challenge is the short-lived JWT returned by GET
+//     /auth/register-agent/nonce. Signature proves control of the wallet's
+//     private key (EIP-191 personal_sign).
+//
+//   - **Email/password (fallback)**: {email, password}
+//     For agent developers who want email recovery. Auto-verified (no email
+//     confirmation required — the registration itself is a deliberate action).
+//     Username may be provided; otherwise derived from email.
+//
+// Response returns the plain-text `api_key` ONE TIME. Store it safely.
+//
+// POST /api/v1/auth/register-agent
+func (h *AuthHandler) RegisterAgent(c *gin.Context) {
+	var body struct {
+		// Wallet path
+		Wallet    string `json:"wallet"`
+		Challenge string `json:"challenge"`
+		Signature string `json:"signature"`
+		// Email path
+		Email    string `json:"email"`
+		Password string `json:"password"`
+		// Optional (both paths)
+		Username    string `json:"username"`
+		DisplayName string `json:"display_name"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		badRequest(c, err.Error())
+		return
+	}
+
+	var user models.User
+	switch {
+	case body.Wallet != "":
+		// ─── Wallet path ───────────────────────────────────────────────────
+		if body.Challenge == "" || body.Signature == "" {
+			badRequest(c, "wallet path requires {wallet, challenge, signature}")
+			return
+		}
+		wallet := strings.ToLower(strings.TrimSpace(body.Wallet))
+		if !isValidEVMAddress(wallet) {
+			badRequest(c, "wallet must be a 0x-prefixed 40-hex-char EVM address")
+			return
+		}
+
+		claims, err := verifyAgentChallenge(body.Challenge)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, shared.Fail("INVALID_CHALLENGE", "challenge expired or invalid — request a new one via GET /auth/register-agent/nonce"))
+			return
+		}
+		if !strings.EqualFold(claims.Wallet, wallet) {
+			c.JSON(http.StatusUnauthorized, shared.Fail("INVALID_CHALLENGE", "challenge wallet does not match submitted wallet"))
+			return
+		}
+
+		expectedMsg := siweRegisterAgentMessage(wallet, claims.Nonce)
+		recovered, err := recoverSigner(expectedMsg, body.Signature)
+		if err != nil || !strings.EqualFold(recovered, wallet) {
+			c.JSON(http.StatusUnauthorized, shared.Fail("INVALID_SIGNATURE", "signature does not match wallet"))
+			return
+		}
+
+		// Double-check wallet not taken (race since challenge was issued).
+		var existing models.User
+		if h.db.Where("wallet_address = ?", wallet).First(&existing).Error == nil {
+			c.JSON(http.StatusConflict, shared.Fail("WALLET_TAKEN", "this wallet is already registered"))
+			return
+		}
+
+		username := body.Username
+		if username == "" {
+			username = deriveAgentUsername(h.db, wallet)
+		}
+		displayName := body.DisplayName
+		if displayName == "" {
+			displayName = fmt.Sprintf("Agent %s", wallet[:10])
+		}
+
+		user = models.User{
+			ID:            newUserID(),
+			Username:      username,
+			DisplayName:   displayName,
+			WalletAddress: &wallet,
+			IsAgent:       true,
+			EmailVerified: true, // no email to verify
+			Nonce:         newNonce(),
+		}
+
+	case body.Email != "":
+		// ─── Email path ────────────────────────────────────────────────────
+		email := strings.ToLower(strings.TrimSpace(body.Email))
+		if !strings.Contains(email, "@") {
+			badRequest(c, "email is not valid")
+			return
+		}
+		if len(body.Password) < 8 {
+			badRequest(c, "password must be at least 8 characters")
+			return
+		}
+
+		var existing models.User
+		if h.db.Where("email = ?", email).First(&existing).Error == nil {
+			c.JSON(http.StatusConflict, shared.Fail("EMAIL_TAKEN", "email already registered"))
+			return
+		}
+
+		hash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
+		if err != nil {
+			serverError(c, err)
+			return
+		}
+
+		username := body.Username
+		if username == "" {
+			username = deriveAgentUsername(h.db, email)
+		}
+		displayName := body.DisplayName
+		if displayName == "" {
+			displayName = username
+		}
+
+		user = models.User{
+			ID:            newUserID(),
+			Username:      username,
+			DisplayName:   displayName,
+			Email:         &email,
+			PasswordHash:  string(hash),
+			EmailVerified: true, // agent path skips email confirmation
+			IsAgent:       true,
+			Nonce:         newNonce(),
+		}
+
+	default:
+		badRequest(c, "provide either {wallet, challenge, signature} or {email, password}")
+		return
+	}
+
+	// Generate the API key and hash it for storage.
+	plainKey := newAPIKey()
+	hash := middleware.HashAPIKey(plainKey)
+	user.APIKeyHash = &hash
+
+	if err := h.db.Create(&user).Error; err != nil {
+		// Typical failure: duplicate username collision.
+		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "UNIQUE") {
+			c.JSON(http.StatusConflict, shared.Fail("USERNAME_TAKEN", "could not generate a unique username — retry or pass `username` explicitly"))
+			return
+		}
+		serverError(c, err)
+		return
+	}
+
+	ok(c, gin.H{
+		"api_key": plainKey,
+		"user":    user.ToPublic(),
+		"note":    "Store the api_key safely — it will not be shown again. Use it via `X-API-Key` header for all SKILL API requests.",
+	})
+}
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 // recoverSigner recovers the Ethereum address that signed the given message
@@ -733,7 +1011,23 @@ func extractAccessToken(r io.Reader) (string, error) {
 	}
 	token, ok := result["access_token"].(string)
 	if !ok || token == "" {
-		return "", fmt.Errorf("no access_token in response: %v", result)
+		// Surface the exact OAuth error from the provider instead of dumping
+		// the raw map. Both Google and Discord return RFC 6749 error fields:
+		//   {"error": "...", "error_description": "..."}
+		errCode, _ := result["error"].(string)
+		errDesc, _ := result["error_description"].(string)
+		switch errCode {
+		case "invalid_client":
+			return "", fmt.Errorf("OAuth invalid_client — check DISCORD_CLIENT_ID/DISCORD_CLIENT_SECRET (or GOOGLE_*) in .env match the provider console. Provider said: %q", errDesc)
+		case "invalid_grant":
+			return "", fmt.Errorf("OAuth invalid_grant — code expired or redirect_uri mismatch. Provider said: %q", errDesc)
+		case "redirect_uri_mismatch":
+			return "", fmt.Errorf("OAuth redirect_uri_mismatch — the exact callback URL must be whitelisted in the provider console. Provider said: %q", errDesc)
+		case "":
+			return "", fmt.Errorf("no access_token in response: %v", result)
+		default:
+			return "", fmt.Errorf("OAuth %s: %s", errCode, errDesc)
+		}
 	}
 	return token, nil
 }
@@ -748,4 +1042,128 @@ func fetchJSON(endpoint, accessToken string) (map[string]any, error) {
 	defer resp.Body.Close()
 	var result map[string]any
 	return result, json.NewDecoder(resp.Body).Decode(&result)
+}
+
+// ─── Agent registration helpers ──────────────────────────────────────────────
+
+const agentChallengeTTL = 10 * time.Minute
+
+// agentChallengeClaims is the payload of the short-lived challenge JWT.
+type agentChallengeClaims struct {
+	Wallet string `json:"wallet"`
+	Nonce  string `json:"nonce"`
+	jwt.RegisteredClaims
+}
+
+// issueAgentChallenge returns a signed JWT that binds (wallet, nonce) with a
+// short expiry. Stateless — no DB write needed.
+func issueAgentChallenge(wallet, nonce string) (string, error) {
+	claims := &agentChallengeClaims{
+		Wallet: wallet,
+		Nonce:  nonce,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(agentChallengeTTL)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Subject:   "register-agent",
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(config.App.JWTSecret))
+}
+
+// verifyAgentChallenge parses and validates a challenge JWT, returning the
+// wallet and nonce it was issued for.
+func verifyAgentChallenge(tokenStr string) (*agentChallengeClaims, error) {
+	token, err := jwt.ParseWithClaims(tokenStr, &agentChallengeClaims{}, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return []byte(config.App.JWTSecret), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	claims, ok := token.Claims.(*agentChallengeClaims)
+	if !ok || !token.Valid {
+		return nil, fmt.Errorf("invalid challenge token")
+	}
+	if claims.Subject != "register-agent" {
+		return nil, fmt.Errorf("token is not an agent-registration challenge")
+	}
+	return claims, nil
+}
+
+// siweRegisterAgentMessage is distinct from siweMessage so a signature obtained
+// for wallet-binding cannot be replayed against registration.
+func siweRegisterAgentMessage(wallet, nonce string) string {
+	return fmt.Sprintf(
+		"ClawLink wants you to register a new agent account:\n%s\n\n"+
+			"Register as ClawLink Agent\n\n"+
+			"Nonce: %s\n"+
+			"Chain ID: 11111110",
+		wallet, nonce,
+	)
+}
+
+// isValidEVMAddress does a format-only check (0x + 40 hex chars).
+func isValidEVMAddress(addr string) bool {
+	if len(addr) != 42 || !strings.HasPrefix(addr, "0x") {
+		return false
+	}
+	_, err := hex.DecodeString(addr[2:])
+	return err == nil
+}
+
+// newUserID returns a random 18-byte hex ID matching the existing user ID
+// convention (see the example IDs like "8a224cb4e540bf72f24bb2ac3cee98e6809f").
+func newUserID() string {
+	b := make([]byte, 18)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// deriveAgentUsername generates a unique agent_* username from the wallet
+// address or email. If the first candidate is taken, it tries up to 5 suffixes.
+func deriveAgentUsername(db *gorm.DB, seed string) string {
+	base := "agent_"
+	switch {
+	case strings.HasPrefix(seed, "0x") && len(seed) >= 10:
+		base += seed[2:10] // first 8 hex chars
+	case strings.Contains(seed, "@"):
+		local := strings.SplitN(seed, "@", 2)[0]
+		// Sanitize: keep alphanumeric + underscore
+		clean := make([]byte, 0, len(local))
+		for i := 0; i < len(local) && i < 32; i++ {
+			ch := local[i]
+			if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' {
+				clean = append(clean, ch)
+			}
+		}
+		if len(clean) == 0 {
+			base += randHex(4)
+		} else {
+			base = "agent_" + strings.ToLower(string(clean))
+		}
+	default:
+		base += randHex(4)
+	}
+
+	candidate := base
+	for i := 0; i < 5; i++ {
+		var count int64
+		db.Model(&models.User{}).Where("username = ?", candidate).Count(&count)
+		if count == 0 {
+			return candidate
+		}
+		candidate = fmt.Sprintf("%s_%s", base, randHex(2))
+	}
+	// Last resort: always-unique timestamp suffix.
+	return fmt.Sprintf("%s_%d", base, time.Now().UnixNano())
+}
+
+// randHex returns a random hex string of the given byte length.
+func randHex(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }

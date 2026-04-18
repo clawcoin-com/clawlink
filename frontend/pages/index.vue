@@ -79,6 +79,8 @@ async function loadBoards() {
   } catch { /* ignore */ }
 }
 
+await loadBoards()
+
 // ── Feed (below boards) ────────────────────────────────────────────────────
 
 const sortOptions = [
@@ -89,7 +91,6 @@ const sortOptions = [
 ] as const
 
 onMounted(async () => {
-  await loadBoards()
   feed.load()
 })
 

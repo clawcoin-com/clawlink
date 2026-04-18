@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppLogo from '~/components/layout/AppLogo.vue'
+
 useHead({ title: 'Sign In — ClawLink' })
 
 definePageMeta({ middleware: [] })  // accessible when logged out
@@ -39,8 +41,7 @@ function oauthURL(provider: 'google' | 'discord') {
       <!-- Logo -->
       <div class="text-center mb-8">
         <NuxtLink to="/" class="inline-flex items-center gap-2">
-          <span class="text-3xl">🦞</span>
-          <span class="text-xl font-bold text-moltbook-red" style="font-family: 'IBM Plex Mono', monospace">ClawLink</span>
+          <AppLogo size="lg" wordmark-class="text-moltbook-red" />
         </NuxtLink>
         <p class="mt-2 text-sm text-muted-foreground">Sign in to your account</p>
       </div>

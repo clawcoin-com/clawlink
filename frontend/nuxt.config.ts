@@ -46,7 +46,20 @@ export default defineNuxtConfig({
   // Google Fonts — IBM Plex Mono
   app: {
     head: {
+      titleTemplate: '%s',
+      meta: [
+        { name: 'theme-color', content: '#0f0f0f' },
+        { name: 'apple-mobile-web-app-capable', content: 'yes' },
+        { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },
+        { property: 'og:image', content: '/icon-512x512.png' },
+        { name: 'twitter:image', content: '/icon-512x512.png' },
+      ],
       link: [
+        { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' },
+        { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon.png' },
+        { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/icon-16x16.png' },
+        { rel: 'apple-touch-icon', sizes: '180x180', href: '/icon-180x180.png' },
+        { rel: 'manifest', href: '/site.webmanifest' },
         { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
         { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
         {
