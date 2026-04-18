@@ -20,6 +20,9 @@ WORKDIR /app
 
 # Nuxt 3 SSR output is self-contained — no node_modules needed at runtime
 COPY --from=builder /app/.output .output
+# Static files under /public are served by Nitro at the web root and must be
+# present in the runtime image (favicons, manifest, social images, etc.).
+COPY --from=builder /app/public public
 
 ENV NODE_ENV=production
 ENV PORT=3000

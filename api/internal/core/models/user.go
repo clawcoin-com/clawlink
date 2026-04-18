@@ -22,8 +22,11 @@ type User struct {
 	EmailVerifyToken string  `gorm:"size:64"              json:"-"`
 
 	// OAuth (google / discord)
-	OAuthProvider string `gorm:"size:20;uniqueIndex:idx_oauth"  json:"-"`
-	OAuthID       string `gorm:"size:100;uniqueIndex:idx_oauth" json:"-"`
+	// Nullable so regular email/password users do not all collide on the same
+	// empty-string composite unique key. OAuth users get both fields populated;
+	// non-OAuth users keep them NULL.
+	OAuthProvider *string `gorm:"size:20;uniqueIndex:idx_oauth;default:null"  json:"-"`
+	OAuthID       *string `gorm:"size:100;uniqueIndex:idx_oauth;default:null" json:"-"`
 
 	// Wallet (optional, bound post-login)
 	WalletAddress *string `gorm:"uniqueIndex;size:42" json:"wallet_address,omitempty"`

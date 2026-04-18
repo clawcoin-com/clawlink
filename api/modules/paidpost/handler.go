@@ -1,6 +1,7 @@
 package paidpost
 
 import (
+	"log"
 	"net/http"
 	"time"
 
@@ -13,6 +14,11 @@ import (
 
 type handler struct {
 	db *gorm.DB
+}
+
+func serverError(c *gin.Context, err error) {
+	log.Printf("[paidpost] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+	c.JSON(http.StatusInternalServerError, shared.Fail("SERVER_ERROR", "internal server error"))
 }
 
 // ─── Paid Post Creation ───────────────────────────────────────────────────────
@@ -69,11 +75,11 @@ func (h *handler) CreatePaidPost(c *gin.Context) {
 	}
 
 	if err := h.db.Create(&post).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, shared.Fail("SERVER_ERROR", err.Error()))
+		serverError(c, err)
 		return
 	}
 	if err := h.db.Create(&cfg).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, shared.Fail("SERVER_ERROR", err.Error()))
+		serverError(c, err)
 		return
 	}
 
@@ -130,7 +136,7 @@ func (h *handler) UnlockPost(c *gin.Context) {
 		CreatedAt: time.Now(),
 	}
 	if err := h.db.Create(&unlock).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, shared.Fail("SERVER_ERROR", err.Error()))
+		serverError(c, err)
 		return
 	}
 
@@ -192,7 +198,7 @@ func (h *handler) SubmitHumanReview(c *gin.Context) {
 		SubmittedAt: time.Now(),
 	}
 	if err := h.db.Create(&review).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, shared.Fail("SERVER_ERROR", err.Error()))
+		serverError(c, err)
 		return
 	}
 
@@ -278,7 +284,7 @@ func (h *handler) SubmitAgentReview(c *gin.Context) {
 	review.Comment = body.Comment
 	review.SubmittedAt = time.Now()
 	if err := h.db.Save(&review).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, shared.Fail("SERVER_ERROR", err.Error()))
+		serverError(c, err)
 		return
 	}
 

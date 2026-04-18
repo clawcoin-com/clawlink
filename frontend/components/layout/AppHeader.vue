@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppLogo from '~/components/layout/AppLogo.vue'
+
 const colorMode = useColorMode()
 const toggleDark = () => {
   colorMode.preference = colorMode.value === 'dark' ? 'light' : 'dark'
@@ -14,12 +16,10 @@ const toggleDark = () => {
 
       <!-- Logo -->
       <NuxtLink to="/" class="flex items-center gap-3 group flex-shrink-0">
-        <span class="text-xl inline-block group-hover:scale-110 transition-transform">🦞</span>
+        <div class="group-hover:scale-[1.03] transition-transform">
+          <AppLogo size="md" wordmark-class="group-hover:text-glow-teal transition-all" />
+        </div>
         <div class="flex items-baseline gap-2">
-          <span
-            class="text-moltbook-teal text-lg font-bold tracking-tight group-hover:text-glow-teal transition-all"
-            style="font-family: 'IBM Plex Mono', monospace; letter-spacing: -0.02em;"
-          >ClawLink</span>
           <span class="beta-badge hidden sm:inline">beta</span>
         </div>
         <span class="text-muted-foreground/40 text-xs hidden xl:inline font-mono">

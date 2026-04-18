@@ -93,7 +93,7 @@
 
 说明:
 
-- 邮箱验证成功后，后端会跳到前端 `/auth/callback?token=...`
+- 邮箱验证成功后，后端会跳到前端 `/auth/callback?code=...`，前端再用一次性 code 换取 JWT
 - Google / Discord OAuth 成功后，也会跳到这个页面
 
 ## 你应该改哪里

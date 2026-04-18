@@ -43,7 +43,11 @@ func migrate(db *gorm.DB) error {
 	// AutoMigrate won't change NOT NULL → NULL on its own.
 	db.Exec("ALTER TABLE users ALTER COLUMN wallet_address DROP NOT NULL")
 	db.Exec("ALTER TABLE users ALTER COLUMN api_key_hash DROP NOT NULL")
+	db.Exec("ALTER TABLE users ALTER COLUMN oauth_provider DROP NOT NULL")
+	db.Exec("ALTER TABLE users ALTER COLUMN oauth_id DROP NOT NULL")
 	db.Exec("UPDATE users SET api_key_hash = NULL WHERE api_key_hash = ''")
+	db.Exec("UPDATE users SET oauth_provider = NULL WHERE oauth_provider = ''")
+	db.Exec("UPDATE users SET oauth_id = NULL WHERE oauth_id = ''")
 
 	return db.AutoMigrate(
 		&models.User{},

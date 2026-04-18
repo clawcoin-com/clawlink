@@ -33,9 +33,9 @@ export default defineNuxtConfig({
     // Server-only (SSR → Docker internal network).  Never sent to browser.
     apiBase: process.env.NUXT_API_BASE ?? 'http://localhost:8080/api/v1',
     public: {
-      // Client-side (browser → nginx proxy).  Also used as SSR fallback when
-      // NUXT_API_BASE is not set (e.g. local `npm run dev`).
-      apiBase: process.env.NUXT_PUBLIC_API_URL ?? 'http://localhost:8080/api/v1',
+      // Client-side (browser → nginx proxy). Standardized on API_BASE naming to
+      // avoid API_URL / API_BASE mismatches that can silently fall back to localhost.
+      apiBase: process.env.NUXT_PUBLIC_API_BASE ?? 'http://localhost:8080/api/v1',
       clawcoinRpc: process.env.NUXT_PUBLIC_CLAWCOIN_RPC ?? 'https://evm-testnet.clawcoin.com',
       clawcoinChainId: Number(process.env.NUXT_PUBLIC_CLAWCOIN_CHAIN_ID ?? '11111110'),
     },
@@ -46,7 +46,20 @@ export default defineNuxtConfig({
   // Google Fonts — IBM Plex Mono
   app: {
     head: {
+      titleTemplate: '%s',
+      meta: [
+        { name: 'theme-color', content: '#0f0f0f' },
+        { name: 'apple-mobile-web-app-capable', content: 'yes' },
+        { name: 'apple-mobile-web-app-status-bar-style', content: 'black-translucent' },
+        { property: 'og:image', content: '/icon-512x512.png' },
+        { name: 'twitter:image', content: '/icon-512x512.png' },
+      ],
       link: [
+        { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' },
+        { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon.png' },
+        { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/icon-16x16.png' },
+        { rel: 'apple-touch-icon', sizes: '180x180', href: '/icon-180x180.png' },
+        { rel: 'manifest', href: '/site.webmanifest' },
         { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
         { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
         {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"strings"
 	"time"
 
 	"github.com/clawcoin-com/clawlink/internal/core/config"
@@ -42,9 +43,23 @@ func main() {
 	}
 	r := gin.Default()
 
-	// CORS — allow all origins for now; restrict in production.
+	// CORS — config-driven allowlist in production, wildcard in development.
 	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
+		origin := c.GetHeader("Origin")
+		if origin != "" {
+			for _, allowed := range cfg.CORSOrigins {
+				if allowed == "*" || strings.EqualFold(strings.TrimRight(allowed, "/"), strings.TrimRight(origin, "/")) {
+					if allowed == "*" {
+						c.Header("Access-Control-Allow-Origin", "*")
+					} else {
+						c.Header("Access-Control-Allow-Origin", origin)
+						c.Header("Access-Control-Allow-Credentials", "true")
+						c.Header("Vary", "Origin")
+					}
+					break
+				}
+			}
+		}
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		if c.Request.Method == "OPTIONS" {
@@ -86,6 +101,7 @@ func main() {
 		// Email / password
 		auth.POST("/register", rl(true), authH.Register)
 		auth.POST("/login", rl(true), authH.Login)
+		auth.POST("/exchange", rl(true), authH.ExchangeAuthCode)
 		auth.GET("/verify-email", rl(false), authH.VerifyEmail)
 
 		// OAuth2 (Google, Discord)
@@ -101,6 +117,12 @@ func main() {
 		auth.POST("/apikey", rl(true), authMw, authH.GenerateAPIKey)
 		auth.POST("/apikey/rotate", rl(true), authMw, authH.RotateAPIKey)
 		auth.DELETE("/apikey", rl(true), authMw, authH.RevokeAPIKey)
+
+		// One-shot agent registration (no JWT required — wallet signature OR
+		// email+password create an agent account + API key in a single round.
+		// Write rate-limited to prevent abuse.)
+		auth.GET("/register-agent/nonce", rl(false), authH.RegisterAgentChallenge)
+		auth.POST("/register-agent", rl(true), authH.RegisterAgent)
 	}
 
 	// Feed
