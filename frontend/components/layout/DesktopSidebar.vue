@@ -9,18 +9,18 @@ onMounted(async () => {
   try { subs.value = await api.get<SubMolt[]>('/submolts') } catch {}
 })
 
-// Icons for the 3 canonical boards; anything else gets a letter avatar.
 const coreIcons: Record<string, string> = {
-  'human-human': '👥',
-  'agent-agent': '🤖',
-  'human-agent': '🤝',
+  'human-human': 'ri-team-line',
+  'agent-agent': 'ri-robot-line',
+  'human-agent': 'ri-shake-hands-line',
 }
 
 const navLinks = [
-  { to: '/',          label: 'Home',        icon: '🏠' },
-  { to: '/following', label: 'Following',   icon: '👥' },
-  { to: '/s',         label: 'Communities', icon: '🌐' },
-  { to: '/docs',      label: 'Docs',        icon: '📖' },
+  { to: '/',          label: 'Home',        icon: 'ri-home-5-line' },
+  { to: '/following', label: 'Following',   icon: 'ri-user-heart-line' },
+  { to: '/s',         label: 'Communities', icon: 'ri-layout-grid-line' },
+  { to: '/docs',      label: 'Docs',        icon: 'ri-file-text-line' },
+  { to: '/settings',  label: 'Settings',    icon: 'ri-settings-3-line' },
 ]
 
 function isActive(path: string) {
@@ -39,55 +39,58 @@ function isActive(path: string) {
           :key="link.to"
           :to="link.to"
           :class="[
-            'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+            'flex items-center gap-3 px-3 py-2 rounded-sm text-sm transition-colors',
             isActive(link.to)
-              ? 'bg-muted font-medium text-foreground'
-              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+              ? 'bg-moltbook-teal/10 text-moltbook-teal border-l-2 border-moltbook-teal pl-[10px]'
+              : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
           ]"
         >
-          <span class="text-base">{{ link.icon }}</span>
+          <i :class="[link.icon, 'text-base w-4 text-center flex-shrink-0']" />
           {{ link.label }}
         </NuxtLink>
       </div>
 
       <!-- Communities -->
       <div v-if="subs.length">
-        <h3 class="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-          Communities
-        </h3>
+        <div class="px-3 mb-2 flex items-center gap-2">
+          <div class="w-0.5 h-3 bg-moltbook-teal" />
+          <h3 class="text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.15em]">
+            Communities
+          </h3>
+        </div>
         <div class="space-y-0.5">
           <NuxtLink
             v-for="s in subs"
             :key="s.id"
             :to="`/s/${s.id}`"
             :class="[
-              'flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors',
+              'flex items-center gap-3 px-3 py-2 rounded-sm text-sm transition-colors',
               route.path === `/s/${s.id}`
-                ? 'bg-muted font-medium text-foreground'
-                : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                ? 'bg-moltbook-teal/10 text-moltbook-teal border-l-2 border-moltbook-teal pl-[10px]'
+                : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
             ]"
           >
-            <!-- Core boards get emoji icons; user-created boards get a letter -->
-            <span
+            <i
               v-if="coreIcons[s.name]"
-              class="w-6 h-6 flex items-center justify-center text-base flex-shrink-0"
-            >{{ coreIcons[s.name] }}</span>
+              :class="[coreIcons[s.name], 'w-4 text-center flex-shrink-0 text-base']"
+            />
             <span
               v-else
-              class="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0"
+              class="w-4 h-4 bg-primary/10 text-primary flex items-center justify-center text-[10px] font-bold flex-shrink-0"
             >{{ s.name.charAt(0).toUpperCase() }}</span>
             <span class="truncate">s/{{ s.name }}</span>
           </NuxtLink>
         </div>
       </div>
 
-      <!-- New Post shortcut -->
+      <!-- New Post -->
       <div class="px-2">
         <NuxtLink
           to="/submit"
-          class="flex items-center justify-center gap-2 w-full py-2 bg-moltbook-red hover:bg-moltbook-red-hover text-white text-sm font-bold rounded-lg transition-colors"
+          class="flex items-center justify-center gap-2 w-full py-2 bg-moltbook-red hover:bg-moltbook-red-hover text-white text-sm font-bold rounded-sm transition-colors"
         >
-          ✏️ New Post
+          <i class="ri-pencil-line" />
+          New Post
         </NuxtLink>
       </div>
 

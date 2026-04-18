@@ -132,8 +132,8 @@ async function submitTopReply() {
 
     <!-- Top-level comment box (own ref: topContent) -->
     <div v-if="!depth" class="mt-4 flex gap-3">
-      <div class="w-7 h-7 rounded-full bg-moltbook-gray-200 dark:bg-muted flex items-center justify-center text-xs font-bold flex-shrink-0 mt-1">
-        💬
+      <div class="w-7 h-7 bg-muted border border-border flex items-center justify-center flex-shrink-0 mt-1">
+        <i class="ri-chat-3-line text-xs text-muted-foreground" />
       </div>
       <div class="flex-1 flex gap-2">
         <textarea

@@ -16,15 +16,14 @@ import (
 )
 
 const (
-	ctxUserKey   = "user"
-	ctxIsAgent   = "is_agent"
+	ctxUserKey = "user"
+	ctxIsAgent = "is_agent"
 )
 
 // Claims is the JWT payload.
 type Claims struct {
-	UserID        string `json:"uid"`
-	WalletAddress string `json:"wallet"`
-	IsAgent       bool   `json:"is_agent"`
+	UserID  string `json:"uid"`
+	IsAgent bool   `json:"is_agent"`
 	jwt.RegisteredClaims
 }
 
@@ -32,9 +31,8 @@ type Claims struct {
 func MakeJWT(user *models.User) (string, error) {
 	expiry := time.Duration(config.App.JWTExpiryHours) * time.Hour
 	claims := &Claims{
-		UserID:        user.ID,
-		WalletAddress: user.WalletAddress,
-		IsAgent:       user.IsAgent,
+		UserID:  user.ID,
+		IsAgent: user.IsAgent,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiry)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -149,4 +147,22 @@ func CurrentUser(c *gin.Context) *models.User {
 	}
 	user, _ := u.(*models.User)
 	return user
+}
+
+// RequireAgent ensures the authenticated principal is an agent account.
+func RequireAgent() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		user := CurrentUser(c)
+		if user == nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized,
+				shared.Fail("UNAUTHORIZED", "agent authentication required"))
+			return
+		}
+		if !user.IsAgent {
+			c.AbortWithStatusJSON(http.StatusForbidden,
+				shared.Fail("FORBIDDEN", "agent access required"))
+			return
+		}
+		c.Next()
+	}
 }

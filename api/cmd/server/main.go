@@ -64,17 +64,18 @@ func main() {
 	})
 
 	// ─── Handler Constructors ─────────────────────────────────────────────────
-	authMw    := middleware.Auth(db)
+	authMw := middleware.Auth(db)
 	optAuthMw := middleware.OptionalAuth(db)
-	rl        := middleware.RateLimit
-	authH     := handlers.NewAuthHandler(db)
-	postH     := handlers.NewPostHandler(db)
-	replyH    := handlers.NewReplyHandler(db)
-	subH      := handlers.NewSubMoltHandler(db)
-	userH     := handlers.NewUserHandler(db)
-	feedH     := handlers.NewFeedHandler(db)
-	rqStore   := replyqueue.Register(db)
-	skillH    := skill.New(db, rqStore)
+	agentMw := middleware.RequireAgent()
+	rl := middleware.RateLimit
+	authH := handlers.NewAuthHandler(db)
+	postH := handlers.NewPostHandler(db)
+	replyH := handlers.NewReplyHandler(db)
+	subH := handlers.NewSubMoltHandler(db)
+	userH := handlers.NewUserHandler(db)
+	feedH := handlers.NewFeedHandler(db)
+	rqStore := replyqueue.Register(db)
+	skillH := skill.New(db, rqStore)
 
 	// ─── API v1 Routes ────────────────────────────────────────────────────────
 	v1 := r.Group("/api/v1")
@@ -82,49 +83,63 @@ func main() {
 	// Auth
 	auth := v1.Group("/auth")
 	{
-		auth.GET("/nonce",    rl(false), authH.GetNonce)
-		auth.POST("/verify",  rl(true),  authH.VerifyWallet)
-		auth.GET("/captcha",  rl(false), authH.GetCaptcha)
-		auth.POST("/apikey",  rl(true),  authMw, authH.GenerateAPIKey)
+		// Email / password
+		auth.POST("/register", rl(true), authH.Register)
+		auth.POST("/login", rl(true), authH.Login)
+		auth.GET("/verify-email", rl(false), authH.VerifyEmail)
+
+		// OAuth2 (Google, Discord)
+		auth.GET("/oauth/:provider", authH.OAuthRedirect)
+		auth.GET("/oauth/:provider/callback", authH.OAuthCallback)
+
+		// Wallet binding (requires existing session)
+		auth.GET("/wallet/nonce", rl(false), authMw, authH.WalletNonce)
+		auth.POST("/wallet/bind", rl(true), authMw, authH.WalletBind)
+
+		// Agent API key
+		auth.GET("/captcha", rl(false), authH.GetCaptcha)
+		auth.POST("/apikey", rl(true), authMw, authH.GenerateAPIKey)
+		auth.POST("/apikey/rotate", rl(true), authMw, authH.RotateAPIKey)
+		auth.DELETE("/apikey", rl(true), authMw, authH.RevokeAPIKey)
 	}
 
 	// Feed
 	feed := v1.Group("/feed")
 	{
-		feed.GET("",          rl(false), optAuthMw, feedH.ForYou)
+		feed.GET("", rl(false), optAuthMw, feedH.ForYou)
 		feed.GET("/following", rl(false), authMw, feedH.Following)
 	}
 
 	// Posts
 	posts := v1.Group("/posts")
 	{
-		posts.GET("",          rl(false), optAuthMw, postH.List)
-		posts.POST("",         rl(true),  authMw,    postH.Create)
-		posts.GET("/:id",      rl(false), optAuthMw, postH.Get)
-		posts.DELETE("/:id",   rl(true),  authMw,    postH.Delete)
-		posts.POST("/:id/vote", rl(true),  authMw,   postH.Vote)
+		posts.GET("", rl(false), optAuthMw, postH.List)
+		posts.POST("", authMw, rl(true), postH.Create)
+		posts.GET("/:id", rl(false), optAuthMw, postH.Get)
+		posts.DELETE("/:id", authMw, rl(true), postH.Delete)
+		posts.POST("/:id/vote", authMw, rl(true), postH.Vote)
 
 		// Replies under a post
-		posts.GET("/:id/replies",  rl(false), replyH.ListByPost)
-		posts.POST("/:id/replies", rl(true),  authMw, replyH.Create)
+		posts.GET("/:id/replies", rl(false), replyH.ListByPost)
+		posts.POST("/:id/replies", authMw, rl(true), replyH.Create)
 	}
 
 	// Replies (standalone operations)
 	replies := v1.Group("/replies")
 	{
-		replies.DELETE("/:id",      rl(true), authMw, replyH.Delete)
-		replies.POST("/:id/vote",   rl(true), authMw, replyH.Vote)
+		replies.DELETE("/:id", authMw, rl(true), replyH.Delete)
+		replies.POST("/:id/vote", authMw, rl(true), replyH.Vote)
 	}
 
 	// SubMolts
 	subs := v1.Group("/submolts")
 	{
-		subs.GET("",          rl(false), subH.List)
-		subs.POST("",         rl(true),  authMw, subH.Create)
-		subs.GET("/:id",      rl(false), optAuthMw, subH.Get)
-		subs.POST("/:id/join",    rl(true), authMw, subH.Join)
-		subs.DELETE("/:id/join",  rl(true), authMw, subH.Leave)
-		subs.PUT("/:id/config",   rl(true), authMw, subH.UpdateConfig)
+		subs.GET("", rl(false), subH.List)
+		subs.POST("", authMw, rl(true), subH.Create)
+		subs.GET("/:id", rl(false), optAuthMw, subH.Get)
+		subs.POST("/:id/join", authMw, rl(true), subH.Join)
+		subs.DELETE("/:id/join", authMw, rl(true), subH.Leave)
+		subs.PUT("/:id/config", authMw, rl(true), subH.UpdateConfig)
 		// Posts in a submolt (convenience alias — same as GET /posts?submolt_id=:id)
 		subs.GET("/:id/posts", rl(false), optAuthMw, postH.List)
 	}
@@ -132,39 +147,40 @@ func main() {
 	// Users
 	users := v1.Group("/users")
 	{
-		users.GET("/me",               rl(false), authMw, userH.Me)
-		users.PUT("/me",               rl(true),  authMw, userH.UpdateMe)
-		users.GET("/me/posts",         rl(false), authMw, userH.MyPosts)
-		users.GET("/me/notifications", rl(false), authMw, userH.Notifications)
-		users.GET("/:wallet",              rl(false), optAuthMw, userH.GetByWallet)
-		users.POST("/:wallet/follow",      rl(true),  authMw,    userH.Follow)
-		users.DELETE("/:wallet/follow",    rl(true),  authMw,    userH.Unfollow)
+		users.GET("/me", authMw, rl(false), userH.Me)
+		users.PUT("/me", authMw, rl(true), userH.UpdateMe)
+		users.GET("/me/posts", authMw, rl(false), userH.MyPosts)
+		users.GET("/me/notifications", authMw, rl(false), userH.Notifications)
+		users.GET("/:wallet", rl(false), optAuthMw, userH.GetByWallet)
+		users.GET("/:wallet/posts", rl(false), optAuthMw, userH.PostsByHandle)
+		users.POST("/:wallet/follow", authMw, rl(true), userH.Follow)
+		users.DELETE("/:wallet/follow", authMw, rl(true), userH.Unfollow)
 	}
 
 	// ─── Agent SKILL API ──────────────────────────────────────────────────────
 	// All skill endpoints require X-API-Key.
 	sk := v1.Group("/skill")
 	{
-		sk.GET("/docs",              skillH.Docs)
-		sk.GET("/heartbeat",         rl(false), authMw, skillH.Heartbeat)
-		sk.GET("/feed",              rl(false), authMw, skillH.Feed)
-		sk.GET("/submolts",          rl(false), authMw, skillH.ListSubmolts)
-		sk.POST("/posts",            rl(true),  authMw, skillH.CreatePost)
-		sk.GET("/posts/:id/thread",  rl(false), authMw, skillH.GetThread)
-		sk.POST("/posts/:id/reply",  rl(true),  authMw, skillH.Reply)
-		sk.POST("/posts/:id/vote",   rl(true),  authMw, skillH.Vote)
-		sk.PUT("/profile",           rl(true),  authMw, skillH.UpdateProfile)
-		sk.POST("/reviews/submit",     rl(true),  authMw, skillH.SubmitReview)
-		// v0.4 — ordered reply queue + thread tools
-		sk.GET("/posts/:id/summary",   rl(false), authMw, skillH.GetSummary)
-		sk.GET("/posts/:id/activity",  rl(false), authMw, skillH.GetActivity)
-		sk.POST("/replies/preview",    rl(false), authMw, skillH.PreviewReply)
-		sk.POST("/queue/take",         rl(true),  authMw, skillH.QueueTake)
-		sk.POST("/queue/submit",       rl(true),  authMw, skillH.QueueSubmit)
+		sk.GET("/docs", skillH.Docs)
+		sk.GET("/heartbeat", authMw, agentMw, rl(false), skillH.Heartbeat)
+		sk.GET("/feed", authMw, agentMw, rl(false), skillH.Feed)
+		sk.GET("/submolts", authMw, agentMw, rl(false), skillH.ListSubmolts)
+		sk.POST("/posts", authMw, agentMw, rl(true), skillH.CreatePost)
+		sk.GET("/posts/:id/thread", authMw, agentMw, rl(false), skillH.GetThread)
+		sk.POST("/posts/:id/reply", authMw, agentMw, rl(true), skillH.Reply)
+		sk.POST("/posts/:id/vote", authMw, agentMw, rl(true), skillH.Vote)
+		sk.PUT("/profile", authMw, agentMw, rl(true), skillH.UpdateProfile)
+		sk.POST("/reviews/submit", authMw, agentMw, rl(true), skillH.SubmitReview)
+		// v0.35 — ordered reply queue + thread tools
+		sk.GET("/posts/:id/summary", authMw, agentMw, rl(false), skillH.GetSummary)
+		sk.GET("/posts/:id/activity", authMw, agentMw, rl(false), skillH.GetActivity)
+		sk.POST("/replies/preview", authMw, agentMw, rl(false), skillH.PreviewReply)
+		sk.POST("/queue/take", authMw, agentMw, rl(true), skillH.QueueTake)
+		sk.POST("/queue/submit", authMw, agentMw, rl(true), skillH.QueueSubmit)
 	}
 
 	// ─── Module Registration ──────────────────────────────────────────────────
-	paidpost.Register(v1, db, authMw)
+	paidpost.Register(v1, db, authMw, agentMw, rl)
 
 	// ─── Start ────────────────────────────────────────────────────────────────
 	addr := ":" + cfg.Port

@@ -37,7 +37,14 @@ func Connect() {
 }
 
 // migrate runs GORM AutoMigrate for all core models.
+// It also handles column type changes that AutoMigrate cannot do automatically.
 func migrate(db *gorm.DB) error {
+	// Make wallet_address nullable if it isn't already (idempotent ALTER).
+	// AutoMigrate won't change NOT NULL → NULL on its own.
+	db.Exec("ALTER TABLE users ALTER COLUMN wallet_address DROP NOT NULL")
+	db.Exec("ALTER TABLE users ALTER COLUMN api_key_hash DROP NOT NULL")
+	db.Exec("UPDATE users SET api_key_hash = NULL WHERE api_key_hash = ''")
+
 	return db.AutoMigrate(
 		&models.User{},
 		&models.Post{},

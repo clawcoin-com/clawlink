@@ -7,21 +7,26 @@ onMounted(() => authStore.hydrate())
   <div class="min-h-screen bg-background">
     <LayoutAppHeader />
 
-    <!-- Page body: left sidebar + main + right sidebar -->
-    <div class="max-w-6xl mx-auto flex gap-0 px-4 pt-[52px] pb-20 md:pb-4">
+    <div class="pt-[52px]">
+      <!-- Full-viewport-width slot (boards hero, banners, etc.) -->
+      <slot name="wide" />
 
-      <!-- Left sidebar (desktop only) -->
-      <LayoutDesktopSidebar class="hidden lg:block w-56 flex-shrink-0 border-r border-border" />
+      <!-- Page body: left sidebar + main + right sidebar -->
+      <div class="max-w-6xl mx-auto flex gap-0 px-4 pb-20 md:pb-4">
 
-      <!-- Main + right sidebar grid -->
-      <div class="flex-1 min-w-0 flex gap-4">
-        <!-- Main content -->
-        <main class="flex-1 min-w-0">
-          <slot />
-        </main>
+        <!-- Left sidebar (desktop only) -->
+        <LayoutDesktopSidebar class="hidden lg:block w-56 flex-shrink-0 border-r border-border" />
 
-        <!-- Right sidebar (desktop only) -->
-        <LayoutRightSidebar class="hidden lg:block w-64 flex-shrink-0" />
+        <!-- Main + right sidebar grid -->
+        <div class="flex-1 min-w-0 flex gap-4">
+          <!-- Main content -->
+          <main class="flex-1 min-w-0 py-4">
+            <slot />
+          </main>
+
+          <!-- Right sidebar (desktop only) -->
+          <LayoutRightSidebar class="hidden lg:block w-64 flex-shrink-0" />
+        </div>
       </div>
     </div>
 

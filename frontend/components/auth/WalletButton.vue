@@ -1,36 +1,119 @@
 <script setup lang="ts">
-const { login, logout, loading } = useAuth()
+const { logout } = useAuth()
 const authStore = useAuthStore()
+
+const open = ref(false)
+const dropdownRef = ref<HTMLElement | null>(null)
+
+onMounted(() => {
+  document.addEventListener('click', onOutsideClick)
+})
+onUnmounted(() => {
+  document.removeEventListener('click', onOutsideClick)
+})
+function onOutsideClick(e: MouseEvent) {
+  if (dropdownRef.value && !dropdownRef.value.contains(e.target as Node)) {
+    open.value = false
+  }
+}
+
+const avatarLetter = computed(() => {
+  const u = authStore.user
+  if (!u) return '?'
+  return (u.display_name || u.username || u.email || '?').charAt(0).toUpperCase()
+})
+
+const displayName = computed(() => {
+  const u = authStore.user
+  if (!u) return ''
+  return u.display_name || u.username || u.email?.split('@')[0] || 'Account'
+})
+
+const profilePath = computed(() => {
+  const handle = authStore.user?.wallet_address || authStore.user?.username
+  return handle ? `/u/${handle}` : '/settings'
+})
 </script>
 
 <template>
   <div>
     <!-- Not logged in -->
-    <button
+    <NuxtLink
       v-if="!authStore.isLoggedIn"
-      :disabled="loading"
-      class="bg-moltbook-teal hover:bg-moltbook-teal-hover text-moltbook-dark font-bold px-4 py-1.5 rounded-lg text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      @click="login"
+      to="/login"
+      class="bg-moltbook-teal hover:bg-moltbook-teal-hover text-moltbook-dark font-bold px-4 py-1.5 rounded-sm text-sm transition-colors inline-flex items-center gap-1.5"
     >
-      <span v-if="loading">Connecting…</span>
-      <span v-else>Connect Wallet</span>
-    </button>
+      <i class="ri-login-circle-line" />
+      Sign In
+    </NuxtLink>
 
-    <!-- Logged in -->
-    <div v-else class="flex items-center gap-2">
-      <!-- Avatar placeholder -->
-      <div class="w-7 h-7 rounded-full bg-moltbook-red flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-        {{ (authStore.user?.username ?? authStore.user?.wallet_address ?? '?').charAt(0).toUpperCase() }}
-      </div>
-      <span class="text-sm text-moltbook-gray-400 hidden sm:inline truncate max-w-28">
-        {{ authStore.user?.username ?? authStore.user?.wallet_address?.slice(0, 8) + '…' }}
-      </span>
+    <!-- Logged in — avatar + dropdown -->
+    <div v-else ref="dropdownRef" class="relative">
       <button
-        class="px-3 py-1.5 text-xs border border-moltbook-gray-700 text-moltbook-gray-400 hover:border-moltbook-red hover:text-moltbook-red rounded-lg transition-colors"
-        @click="logout"
+        class="flex items-center gap-2 group"
+        @click.stop="open = !open"
       >
-        Sign out
+        <!-- Avatar -->
+        <div
+          v-if="authStore.user?.avatar"
+          class="w-7 h-7 overflow-hidden flex-shrink-0 border border-moltbook-teal/30"
+        >
+          <img :src="authStore.user.avatar" :alt="displayName" class="w-full h-full object-cover" />
+        </div>
+        <div
+          v-else
+          class="w-7 h-7 bg-moltbook-teal/10 border border-moltbook-teal/30 flex items-center justify-center text-moltbook-teal text-xs font-bold flex-shrink-0"
+        >
+          {{ avatarLetter }}
+        </div>
+
+        <span class="text-sm text-muted-foreground hidden sm:inline truncate max-w-28 group-hover:text-foreground transition-colors font-mono">
+          {{ displayName }}
+        </span>
+        <i class="ri-arrow-down-s-line text-xs text-muted-foreground/60 hidden sm:inline" />
       </button>
+
+      <!-- Dropdown -->
+      <div
+        v-if="open"
+        class="absolute right-0 top-full mt-2 w-44 bg-card border border-border rounded-sm shadow-lg overflow-hidden z-50"
+      >
+        <!-- Top line -->
+        <div class="h-px bg-gradient-to-r from-transparent via-moltbook-teal/60 to-transparent" />
+
+        <NuxtLink
+          to="/"
+          class="flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors"
+          @click="open = false"
+        >
+          <i class="ri-home-5-line w-4 text-muted-foreground" />
+          Home
+        </NuxtLink>
+        <NuxtLink
+          :to="profilePath"
+          class="flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors"
+          @click="open = false"
+        >
+          <i class="ri-user-3-line w-4 text-muted-foreground" />
+          Profile
+        </NuxtLink>
+        <NuxtLink
+          to="/settings"
+          class="flex items-center gap-2 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors"
+          @click="open = false"
+        >
+          <i class="ri-settings-3-line w-4 text-muted-foreground" />
+          Settings
+        </NuxtLink>
+        <div class="border-t border-border" />
+        <button
+          class="flex items-center gap-2 w-full px-4 py-2.5 text-sm text-moltbook-red hover:bg-muted/50 transition-colors text-left"
+          @click="() => { open = false; logout() }"
+        >
+          <i class="ri-logout-circle-line w-4" />
+          Sign out
+        </button>
+      </div>
     </div>
   </div>
 </template>

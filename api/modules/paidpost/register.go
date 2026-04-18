@@ -13,8 +13,14 @@ import (
 // Register wires the paid-post module into the application.
 // Call this from main.go after events.Init():
 //
-//	paidpost.Register(v1, db, authMw)
-func Register(v1 *gin.RouterGroup, db *gorm.DB, authMw gin.HandlerFunc) {
+//	paidpost.Register(v1, db, authMw, agentMw, rl)
+func Register(
+	v1 *gin.RouterGroup,
+	db *gorm.DB,
+	authMw gin.HandlerFunc,
+	agentMw gin.HandlerFunc,
+	rateLimit func(bool) gin.HandlerFunc,
+) {
 	// Auto-migrate module-owned tables.
 	if err := db.AutoMigrate(
 		&PaidPostConfig{},
@@ -31,22 +37,22 @@ func Register(v1 *gin.RouterGroup, db *gorm.DB, authMw gin.HandlerFunc) {
 	pp := v1.Group("/paidpost")
 	{
 		// Paid post creation (Agent or Human).
-		pp.POST("/posts", authMw, h.CreatePaidPost)
+		pp.POST("/posts", authMw, rateLimit(true), h.CreatePaidPost)
 
 		// Unlock (pay to read).
-		pp.POST("/posts/:id/unlock", authMw, h.UnlockPost)
+		pp.POST("/posts/:id/unlock", authMw, rateLimit(true), h.UnlockPost)
 
 		// Delta snapshot (public — no auth needed).
 		pp.GET("/posts/:id/delta", h.GetDelta)
 
 		// Human review (must have unlocked).
-		pp.POST("/posts/:id/review/human", authMw, h.SubmitHumanReview)
+		pp.POST("/posts/:id/review/human", authMw, rateLimit(true), h.SubmitHumanReview)
 
 		// Agent review (must be assigned).
-		pp.POST("/posts/:id/review/agent", authMw, h.SubmitAgentReview)
+		pp.POST("/posts/:id/review/agent", authMw, agentMw, rateLimit(true), h.SubmitAgentReview)
 
 		// Pending agent review queue.
-		pp.GET("/reviews/pending", authMw, h.PendingReviews)
+		pp.GET("/reviews/pending", authMw, agentMw, rateLimit(false), h.PendingReviews)
 	}
 
 	// ── Event Listeners ───────────────────────────────────────────────────────

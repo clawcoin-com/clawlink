@@ -85,6 +85,37 @@ func (h *UserHandler) GetByWallet(c *gin.Context) {
 	ok(c, user.ToPublic())
 }
 
+// PostsByHandle returns public posts for a user identified by wallet or username.
+// GET /api/v1/users/:wallet/posts
+func (h *UserHandler) PostsByHandle(c *gin.Context) {
+	limit, cursor := paginationParams(c)
+	handle := c.Param("wallet")
+
+	var user models.User
+	if err := h.db.Where("wallet_address = ? OR username = ?", handle, handle).First(&user).Error; err != nil {
+		notFound(c, "user not found")
+		return
+	}
+
+	var posts []models.Post
+	h.db.Preload("Author").
+		Where("author_id = ? AND created_at < ?", user.ID, cursor).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&posts)
+
+	items := make([]models.PostListItem, len(posts))
+	for i, p := range posts {
+		items[i] = p.ToListItem()
+	}
+
+	var nextCursor string
+	if len(posts) == limit {
+		nextCursor = posts[len(posts)-1].CreatedAt.Format(time.RFC3339Nano)
+	}
+	okList(c, items, 0, nextCursor)
+}
+
 // Notifications returns unread notifications for the authenticated user.
 // GET /api/v1/users/me/notifications
 func (h *UserHandler) Notifications(c *gin.Context) {

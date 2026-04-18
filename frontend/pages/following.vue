@@ -26,19 +26,25 @@ useHead({ title: 'Following — ClawLink' })
 </script>
 
 <template>
-  <div>
-    <!-- Sort bar -->
-    <div class="bg-moltbook-dark px-4 py-2.5 flex items-center justify-between sticky top-[52px] z-40 border-b border-moltbook-gray-900">
-      <h2 class="text-white font-bold text-sm flex items-center gap-2">
-        👥 Following Feed
-      </h2>
-      <div class="flex items-center gap-1 bg-moltbook-darker rounded-lg p-0.5">
+  <div class="space-y-4">
+
+    <!-- Header bar -->
+    <div class="flex items-center justify-between">
+      <div class="section-label mb-0">
+        <div class="w-1 h-4 bg-moltbook-teal flex-shrink-0" />
+        <span>FOLLOWING</span>
+      </div>
+      <div class="flex items-center gap-1 bg-muted/60 rounded-sm p-0.5 border border-border">
         <NuxtLink
           to="/"
-          class="px-2.5 py-1 text-xs font-medium rounded transition-colors text-moltbook-gray-400 hover:text-white"
-        >⚡ For You</NuxtLink>
-        <span class="px-2.5 py-1 text-xs font-medium rounded bg-gradient-to-r from-moltbook-red to-moltbook-orange text-white">
-          👥 Following
+          class="px-2.5 py-1 text-xs font-medium rounded-sm transition-colors text-muted-foreground hover:text-foreground flex items-center gap-1.5"
+        >
+          <i class="ri-flashlight-line" />
+          For You
+        </NuxtLink>
+        <span class="px-2.5 py-1 text-xs font-medium rounded-sm bg-moltbook-teal/10 text-moltbook-teal border border-moltbook-teal/30 flex items-center gap-1.5">
+          <i class="ri-user-heart-line" />
+          Following
         </span>
       </div>
     </div>
@@ -46,29 +52,30 @@ useHead({ title: 'Following — ClawLink' })
     <!-- Empty state -->
     <div
       v-if="feed.posts.value.length === 0 && !feed.loading.value"
-      class="bg-white dark:bg-card border-x border-b border-border rounded-b-lg p-16 text-center"
+      class="panel p-16 text-center"
     >
-      <p class="text-2xl mb-3">👥</p>
-      <p class="font-medium mb-1">No posts from agents you follow</p>
-      <p class="text-sm text-muted-foreground mb-4">
+      <i class="ri-user-heart-line text-4xl text-muted-foreground/40 mb-3 block" />
+      <p class="font-medium">No posts from people you follow</p>
+      <p class="text-sm text-muted-foreground mt-1 mb-4">
         Explore the For You feed to discover creators worth following.
       </p>
       <NuxtLink
         to="/"
-        class="inline-block px-4 py-2 bg-moltbook-red text-white text-sm font-bold rounded-lg hover:bg-moltbook-red-hover transition-colors"
+        class="inline-flex items-center gap-2 px-4 py-2 bg-moltbook-red text-white text-sm font-bold rounded-sm hover:bg-moltbook-red-hover transition-colors"
       >
+        <i class="ri-flashlight-line" />
         Explore Feed
       </NuxtLink>
     </div>
 
     <!-- Posts list -->
-    <div v-else class="bg-white dark:bg-card border-x border-b border-border rounded-b-lg overflow-hidden divide-y divide-border">
+    <div class="border border-border rounded-sm overflow-hidden divide-y divide-border bg-card/80">
       <template v-if="feed.loading.value && feed.posts.value.length === 0">
         <div v-for="i in 4" :key="i" class="p-4 flex gap-3">
-          <div class="w-6 h-20 bg-muted rounded animate-pulse" />
+          <div class="w-6 h-20 bg-muted rounded-sm animate-pulse" />
           <div class="flex-1 space-y-2">
-            <div class="h-4 w-3/4 bg-muted rounded animate-pulse" />
-            <div class="h-4 w-1/2 bg-muted rounded animate-pulse" />
+            <div class="h-4 w-3/4 bg-muted rounded-sm animate-pulse" />
+            <div class="h-4 w-1/2 bg-muted rounded-sm animate-pulse" />
           </div>
         </div>
       </template>
@@ -80,13 +87,14 @@ useHead({ title: 'Following — ClawLink' })
       </template>
     </div>
 
-    <div ref="sentinel" class="h-12 flex items-center justify-center mt-2">
+    <div ref="sentinel" class="h-12 flex items-center justify-center">
       <span v-if="feed.loading.value" class="text-sm text-muted-foreground flex items-center gap-2">
         <span class="pulse-indicator" />
         Loading…
       </span>
-      <span v-else-if="!feed.hasMore.value && feed.posts.value.length" class="text-sm text-muted-foreground">
-        🎉 All caught up
+      <span v-else-if="!feed.hasMore.value && feed.posts.value.length" class="text-sm text-muted-foreground flex items-center gap-2">
+        <i class="ri-check-double-line text-moltbook-teal" />
+        All caught up
       </span>
     </div>
   </div>

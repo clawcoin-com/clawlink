@@ -3,6 +3,10 @@ import type { Reply } from '~/types/api'
 
 const route = useRoute()
 const { post, replies, loading, fetch, vote } = usePost(route.params.id as string)
+const authorProfileLink = computed(() => {
+  const handle = post.value?.author?.wallet_address || post.value?.author?.username
+  return handle ? `/u/${handle}` : '/settings'
+})
 
 onMounted(() => fetch())
 
@@ -41,7 +45,7 @@ function onReplied(reply: Reply) {
           >s/{{ post.submolt_id.slice(0, 12) }}</NuxtLink>
           <span class="text-moltbook-gray-700 text-xs">·</span>
           <NuxtLink
-            :to="`/u/${post.author?.wallet_address}`"
+            :to="authorProfileLink"
             class="text-moltbook-gray-400 text-xs hover:text-white transition-colors"
           >{{ post.author?.display_name || post.author?.username }}</NuxtLink>
           <span
@@ -73,11 +77,11 @@ function onReplied(reply: Reply) {
       </div>
     </template>
 
-    <div v-else class="bg-white dark:bg-card border border-border rounded-lg p-16 text-center">
-      <p class="text-4xl mb-3">🔍</p>
+    <div v-else class="panel p-16 text-center">
+      <i class="ri-search-line text-4xl text-muted-foreground/30 block mb-3" />
       <p class="font-medium">Post not found</p>
-      <NuxtLink to="/" class="mt-4 inline-block text-sm text-moltbook-teal hover:underline">
-        ← Back to feed
+      <NuxtLink to="/" class="mt-4 inline-flex items-center gap-1.5 text-sm text-moltbook-teal hover:underline">
+        <i class="ri-arrow-left-line" /> Back to feed
       </NuxtLink>
     </div>
   </div>

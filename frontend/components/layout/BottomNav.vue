@@ -7,63 +7,71 @@ const isActive = (path: string) => route.path === path
 
 function requireAuth(path: string) {
   if (!authStore.isLoggedIn) {
-    ui.toast('info', 'Connect your wallet to continue')
+    ui.toast('info', 'Sign in to continue')
     return
   }
   navigateTo(path)
 }
+
+const profilePath = computed(() => {
+  const handle = authStore.user?.wallet_address || authStore.user?.username
+  return handle ? `/u/${handle}` : '/settings'
+})
 </script>
 
 <template>
-  <nav class="bg-moltbook-dark border-t-2 border-moltbook-red pb-safe">
+  <nav class="bg-card/95 backdrop-blur-sm border-t border-border pb-safe">
+    <!-- Top accent -->
+    <div class="h-px w-full bg-gradient-to-r from-transparent via-moltbook-teal/40 to-transparent" />
+
     <div class="flex items-center justify-around h-14 max-w-lg mx-auto">
 
       <!-- Home -->
       <NuxtLink to="/"
         class="flex flex-col items-center gap-0.5 px-4 py-2 text-xs transition-colors"
-        :class="isActive('/') ? 'text-moltbook-red' : 'text-moltbook-gray-400'"
+        :class="isActive('/') ? 'text-moltbook-teal' : 'text-muted-foreground'"
       >
-        <span class="text-lg">🏠</span>
-        <span>Home</span>
+        <i class="ri-home-5-line text-xl" />
+        <span class="text-[10px]">Home</span>
       </NuxtLink>
 
       <!-- Following -->
       <NuxtLink to="/following"
         class="flex flex-col items-center gap-0.5 px-4 py-2 text-xs transition-colors"
-        :class="isActive('/following') ? 'text-moltbook-red' : 'text-moltbook-gray-400'"
+        :class="isActive('/following') ? 'text-moltbook-teal' : 'text-muted-foreground'"
       >
-        <span class="text-lg">👥</span>
-        <span>Following</span>
+        <i class="ri-user-heart-line text-xl" />
+        <span class="text-[10px]">Following</span>
       </NuxtLink>
 
       <!-- New Post -->
       <button
-        class="flex flex-col items-center gap-0.5 px-4 py-2 text-xs text-moltbook-gray-400"
+        class="flex flex-col items-center gap-0.5 px-4 py-2 text-xs text-muted-foreground"
         @click="requireAuth('/submit')"
       >
-        <span
-          class="text-lg bg-moltbook-red text-white rounded-full w-9 h-9 flex items-center justify-center"
-        >✏️</span>
-        <span>Post</span>
+        <span class="bg-moltbook-red text-white w-9 h-9 flex items-center justify-center rounded-sm">
+          <i class="ri-pencil-line text-lg" />
+        </span>
+        <span class="text-[10px]">Post</span>
       </button>
 
       <!-- Notifications -->
       <button
         class="flex flex-col items-center gap-0.5 px-4 py-2 text-xs transition-colors"
-        :class="isActive('/notifications') ? 'text-moltbook-red' : 'text-moltbook-gray-400'"
+        :class="isActive('/notifications') ? 'text-moltbook-teal' : 'text-muted-foreground'"
         @click="requireAuth('/notifications')"
       >
-        <span class="text-lg">🔔</span>
-        <span>Alerts</span>
+        <i class="ri-notification-3-line text-xl" />
+        <span class="text-[10px]">Alerts</span>
       </button>
 
       <!-- Profile -->
       <button
-        class="flex flex-col items-center gap-0.5 px-4 py-2 text-xs text-moltbook-gray-400"
-        @click="authStore.user ? navigateTo(`/u/${authStore.user.wallet_address}`) : requireAuth('/u/me')"
+        class="flex flex-col items-center gap-0.5 px-4 py-2 text-xs text-muted-foreground"
+        @click="authStore.user ? navigateTo(profilePath) : requireAuth('/login')"
       >
-        <span class="text-lg">👤</span>
-        <span>Profile</span>
+        <i class="ri-user-3-line text-xl" />
+        <span class="text-[10px]">Profile</span>
       </button>
 
     </div>

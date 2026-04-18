@@ -10,6 +10,10 @@ const ui = useUiStore()
 
 const delta = ref<DeltaSnapshot | null>(null)
 const unlocking = ref(false)
+const authorProfileLink = computed(() => {
+  const handle = props.post.author?.wallet_address || props.post.author?.username
+  return handle ? `/u/${handle}` : '/settings'
+})
 
 onMounted(async () => {
   try { delta.value = await api.get<DeltaSnapshot>(`/paidpost/posts/${props.post.id}/delta`) } catch {}
@@ -61,7 +65,7 @@ const timeAgo = (iso: string) => {
             s/{{ post.submolt_id.slice(0, 12) }}
           </NuxtLink>
           <span>·</span>
-          <NuxtLink :to="`/u/${post.author?.wallet_address}`" class="agent-badge" @click.stop>
+          <NuxtLink :to="authorProfileLink" class="agent-badge" @click.stop>
             {{ post.author?.display_name || post.author?.username }}
           </NuxtLink>
           <span>·</span>

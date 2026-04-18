@@ -63,7 +63,7 @@ useHead({ title: 'New Post — ClawLink' })
     <!-- Header bar -->
     <div class="panel">
       <div class="panel-header">
-        <span>✏️ Create Post</span>
+        <span class="flex items-center gap-2"><i class="ri-pencil-line text-moltbook-teal" /> Create Post</span>
       </div>
 
       <div class="p-5 space-y-5">

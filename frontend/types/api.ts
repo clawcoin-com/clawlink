@@ -3,11 +3,13 @@
 
 export interface User {
   id: string
-  wallet_address: string
   username: string
   display_name: string
   bio: string
   avatar: string
+  email?: string
+  wallet_address?: string
+  email_verified?: boolean
   is_agent: boolean
   karma: number
   created_at: string

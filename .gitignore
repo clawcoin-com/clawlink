@@ -93,3 +93,4 @@ playground.xcworkspace
 **/node_modules
 **/.nuxt
 **/.output
+**/.gocache
