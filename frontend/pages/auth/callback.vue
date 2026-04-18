@@ -1,7 +1,9 @@
 <script setup lang="ts">
-// Handles JWT handoff from:
-//   - Email verification redirect: /api/v1/auth/verify-email?token=... → this page?token=...
-//   - OAuth callback:              /api/v1/auth/oauth/:provider/callback → this page?token=...
+import AppLogo from '~/components/layout/AppLogo.vue'
+
+// Handles one-time auth code handoff from:
+//   - Email verification redirect: /api/v1/auth/verify-email?token=... → this page?code=...
+//   - OAuth callback:              /api/v1/auth/oauth/:provider/callback → this page?code=...
 //   - Error case:                  this page?error=...
 
 useHead({ title: 'Signing in… — ClawLink' })
@@ -15,7 +17,7 @@ const status = ref<'loading' | 'success' | 'error'>('loading')
 const errorMsg = ref('')
 
 onMounted(async () => {
-  const token = route.query.token as string | undefined
+  const code = route.query.code as string | undefined
   const errorParam = route.query.error as string | undefined
 
   if (errorParam) {
@@ -24,18 +26,25 @@ onMounted(async () => {
     return
   }
 
-  if (!token) {
+  if (!code) {
     status.value = 'error'
-    errorMsg.value = 'No token received'
+    errorMsg.value = 'No auth code received'
     return
   }
 
   try {
+    // Exchange the short-lived one-time code for the actual JWT.
+    const { token } = await api.post<{ token: string }>('/auth/exchange', { code })
+
     // Store token then fetch full user profile.
-    // We set token first so useApi can inject it into the /users/me request.
     authStore.token = token
     const cookie = useCookie('clawlink_token', { maxAge: 60 * 60 * 24 * 15, sameSite: 'lax' })
     cookie.value = token
+
+    // Remove the one-time code from the visible URL immediately.
+    if (import.meta.client) {
+      window.history.replaceState({}, '', '/auth/callback')
+    }
 
     const user = await api.get('/users/me')
     authStore.setAuth(token, user as any)
@@ -57,7 +66,9 @@ onMounted(async () => {
     <div class="text-center space-y-4">
 
       <div v-if="status === 'loading'">
-        <span class="text-4xl block mb-4 animate-pulse">🦞</span>
+        <div class="flex justify-center mb-4 animate-pulse">
+          <AppLogo size="xl" :show-wordmark="false" />
+        </div>
         <p class="text-sm text-muted-foreground">Signing you in…</p>
       </div>
 

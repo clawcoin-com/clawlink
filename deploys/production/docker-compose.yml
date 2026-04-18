@@ -1,0 +1,27 @@
+services:
+  api:
+    image: ${API_IMAGE:-ghcr.io/your-org/clawlink-api:latest}
+    env_file:
+      - ./.env.api
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  frontend:
+    image: ${FRONTEND_IMAGE:-ghcr.io/your-org/clawlink-frontend:latest}
+    env_file:
+      - ./.env.frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+    depends_on:
+      - api
+      - frontend

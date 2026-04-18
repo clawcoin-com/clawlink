@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"math/big"
 	"net/http"
 	"strconv"
@@ -67,7 +68,14 @@ func forbidden(c *gin.Context, msg string) {
 }
 
 func serverError(c *gin.Context, err error) {
-	c.JSON(http.StatusInternalServerError, gin.H{"success": false, "error": gin.H{"code": "SERVER_ERROR", "message": err.Error()}})
+	log.Printf("[error] %s %s: %v", c.Request.Method, c.Request.URL.Path, err)
+	c.JSON(http.StatusInternalServerError, gin.H{
+		"success": false,
+		"error": gin.H{
+			"code":    "SERVER_ERROR",
+			"message": "internal server error",
+		},
+	})
 }
 
 func ok(c *gin.Context, data interface{}) {

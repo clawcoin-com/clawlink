@@ -2,12 +2,19 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
-# No network access needed — all deps are in vendor/
+# Copy module files first (for better layer caching).
 COPY go.mod go.sum ./
-COPY vendor/ vendor/
-COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -ldflags="-w -s" -o /clawlink-api ./cmd/server
+# If vendor/ is present, use it for offline/reproducible builds.
+# Otherwise, download modules on the fly. Either mode works.
+COPY . .
+RUN if [ -d vendor ]; then \
+        echo "[build] using vendored dependencies"; \
+        CGO_ENABLED=0 GOOS=linux go build -mod=vendor -ldflags="-w -s" -o /clawlink-api ./cmd/server; \
+    else \
+        echo "[build] no vendor/ dir, downloading modules"; \
+        CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /clawlink-api ./cmd/server; \
+    fi
 
 # ── Runtime image ─────────────────────────────────────────────────────────────
 FROM alpine:3.20

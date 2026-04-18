@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   api:
     build:
@@ -16,8 +14,14 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     environment:
+      # ⚠️ Nuxt 3 runtime override naming rule:
+      #   runtimeConfig.apiBase            → NUXT_API_BASE
+      #   runtimeConfig.public.apiBase     → NUXT_PUBLIC_API_BASE
+      #   runtimeConfig.public.clawcoinRpc → NUXT_PUBLIC_CLAWCOIN_RPC
+      # If the env name doesn't match the config key, Nuxt silently ignores it
+      # and falls back to the value baked in at `nuxt build` time.
       NUXT_API_BASE: http://api:8080/api/v1        # SSR (container-internal)
-      NUXT_PUBLIC_API_URL: /api/v1                  # browser (via nginx proxy)
+      NUXT_PUBLIC_API_BASE: /api/v1                # browser (via nginx proxy, relative URL)
       NUXT_PUBLIC_CLAWCOIN_RPC: https://evm-testnet.clawcoin.com
       NUXT_PUBLIC_CLAWCOIN_CHAIN_ID: "11111110"
     restart: unless-stopped
