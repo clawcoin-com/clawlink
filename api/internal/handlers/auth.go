@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/rand"
 	"encoding/hex"
@@ -961,12 +962,64 @@ func sendVerificationEmail(email, token string) {
 	}
 
 	go func() {
-		body := fmt.Sprintf(
-			"From: ClawLink <%s>\r\nTo: %s\r\nSubject: Verify your ClawLink account\r\n\r\n"+
-				"Welcome to ClawLink!\r\n\r\nVerify your email by clicking the link below:\r\n%s\r\n\r\n"+
-				"This link expires in 24 hours. If you did not register, ignore this email.",
-			cfg.SMTPFrom, email, link,
+		logoURL := fmt.Sprintf("%s/icon-180x180.png", strings.TrimRight(cfg.FrontendURL, "/"))
+		plainText := fmt.Sprintf(
+			"Welcome to ClawLink!\r\n\r\n"+
+				"Please verify your email by opening this link:\r\n%s\r\n\r\n"+
+				"This verification link expires in 24 hours.\r\n\r\n"+
+				"If the button in your email client does not work, copy and paste the link above into your browser.\r\n\r\n"+
+				"If you did not create a ClawLink account, you can safely ignore this message.\r\n",
+			link,
 		)
+
+		htmlBody := fmt.Sprintf(`
+<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#0f0f0f;color:#e7ecef;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+    <div style="max-width:620px;margin:0 auto;padding:32px 20px;">
+      <div style="background:#14171a;border:1px solid #252a2e;border-radius:16px;overflow:hidden;box-shadow:0 10px 34px rgba(0,0,0,.30);">
+        <div style="padding:24px 28px;border-bottom:1px solid #252a2e;background:linear-gradient(180deg,#161b1f 0%%,#121518 100%%);">
+          <div style="display:flex;align-items:center;gap:14px;">
+            <img src="%s" alt="ClawLink" width="44" height="44" style="display:block;border-radius:10px;" />
+            <div>
+              <div style="font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:#7d8b95;margin-bottom:6px;">ClawLink</div>
+              <div style="font-size:24px;font-weight:700;color:#20c5b5;line-height:1.2;">Verify your email</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="padding:28px;">
+          <p style="margin:0 0 14px 0;font-size:15px;line-height:1.7;color:#dbe4e8;">
+            Welcome to <strong style="color:#ffffff;">ClawLink</strong> — activate your account to sign in and continue.
+          </p>
+
+          <p style="margin:0 0 24px 0;font-size:14px;line-height:1.7;color:#9fb0bb;">
+            This verification link will expire in <strong style="color:#ffffff;">24 hours</strong>.
+          </p>
+
+          <div style="margin:0 0 28px 0;">
+            <a href="%s" style="display:inline-block;background:linear-gradient(135deg,#20c5b5 0%%,#14a89b 100%%);color:#071012;text-decoration:none;font-weight:800;font-size:14px;line-height:1;padding:14px 22px;border-radius:10px;box-shadow:0 8px 22px rgba(32,197,181,.26);border:1px solid rgba(32,197,181,.42);">
+              Activate account
+            </a>
+          </div>
+
+          <div style="margin-top:20px;padding:16px 18px;background:#101214;border:1px solid #252a2e;border-radius:12px;box-shadow:inset 0 1px 0 rgba(255,255,255,.02);">
+            <p style="margin:0 0 8px 0;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#7d8b95;">If the button does not work</p>
+            <p style="margin:0;font-size:13px;line-height:1.8;word-break:break-all;color:#c6d2d9;">
+              <a href="%s" style="color:#20c5b5;text-decoration:none;">%s</a>
+            </p>
+          </div>
+
+          <p style="margin:24px 0 0 0;font-size:12px;line-height:1.7;color:#7d8b95;">
+            If you did not create a ClawLink account, you can safely ignore this email.
+          </p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>`, logoURL, link, link, link)
+
+		body := buildMultipartEmail(cfg.SMTPFrom, email, "Verify your ClawLink account", plainText, htmlBody)
 		addr := fmt.Sprintf("%s:%d", cfg.SMTPHost, cfg.SMTPPort)
 		if err := sendSMTPMail(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom, []string{email}, []byte(body)); err != nil {
 			log.Printf("[auth] failed to send verification email to %s: %v", email, err)
@@ -974,6 +1027,32 @@ func sendVerificationEmail(email, token string) {
 			log.Printf("[auth] sent verification email to %s via %s", email, addr)
 		}
 	}()
+}
+
+func buildMultipartEmail(from, to, subject, plainText, htmlBody string) string {
+	boundary := "clawlink-alt-boundary-2026"
+	var buf bytes.Buffer
+	buf.WriteString(fmt.Sprintf("From: ClawLink <%s>\r\n", from))
+	buf.WriteString(fmt.Sprintf("To: %s\r\n", to))
+	buf.WriteString(fmt.Sprintf("Subject: %s\r\n", subject))
+	buf.WriteString("MIME-Version: 1.0\r\n")
+	buf.WriteString(fmt.Sprintf("Content-Type: multipart/alternative; boundary=%q\r\n", boundary))
+	buf.WriteString("\r\n")
+
+	buf.WriteString(fmt.Sprintf("--%s\r\n", boundary))
+	buf.WriteString("Content-Type: text/plain; charset=UTF-8\r\n")
+	buf.WriteString("Content-Transfer-Encoding: 8bit\r\n\r\n")
+	buf.WriteString(plainText)
+	buf.WriteString("\r\n")
+
+	buf.WriteString(fmt.Sprintf("--%s\r\n", boundary))
+	buf.WriteString("Content-Type: text/html; charset=UTF-8\r\n")
+	buf.WriteString("Content-Transfer-Encoding: 8bit\r\n\r\n")
+	buf.WriteString(htmlBody)
+	buf.WriteString("\r\n")
+
+	buf.WriteString(fmt.Sprintf("--%s--\r\n", boundary))
+	return buf.String()
 }
 
 // sendSMTPMail performs an explicit SMTP session with STARTTLS + AUTH + DATA.
