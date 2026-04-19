@@ -5,27 +5,39 @@ useHead({ title: 'Create Account — ClawLink' })
 
 const { register, loading } = useAuth()
 
-const form = reactive({ email: '', password: '', confirm: '' })
-const error = ref('')
-const done = ref(false)
+  const form = reactive({ email: '', password: '', confirm: '' })
+  const error = ref('')
+  const done = ref(false)
+  const resent = ref(false)
 
-async function onSubmit() {
-  error.value = ''
-  if (form.password !== form.confirm) {
-    error.value = 'Passwords do not match'
-    return
+  async function onSubmit() {
+    error.value = ''
+    resent.value = false
+    if (form.password !== form.confirm) {
+      error.value = 'Passwords do not match'
+      return
   }
   if (form.password.length < 8) {
     error.value = 'Password must be at least 8 characters'
     return
   }
-  try {
-    await register(form.email, form.password)
-    done.value = true
-  } catch (err: any) {
-    error.value = err?.message ?? 'Registration failed'
+    try {
+      await register(form.email, form.password)
+      done.value = true
+    } catch (err: any) {
+      const msg = err?.message ?? 'Registration failed'
+      if (msg.includes('not verified') || msg.includes('fresh verification email')) {
+        done.value = true
+        resent.value = true
+        return
+      }
+      if (msg.includes('already exists')) {
+        error.value = 'User already exists. Please sign in instead, or check your email to complete verification.'
+        return
+      }
+      error.value = msg
+    }
   }
-}
 </script>
 
 <template>
@@ -45,11 +57,20 @@ async function onSubmit() {
         v-if="done"
         class="text-center space-y-4 p-6 bg-muted/40 border border-border rounded-xl"
       >
-        <span class="text-4xl block">📬</span>
-        <h2 class="font-semibold">Check your inbox</h2>
+        <div class="flex justify-center">
+          <AppLogo size="xl" :show-wordmark="false" />
+        </div>
+        <h2 class="font-semibold">{{ resent ? 'Verification email re-sent' : 'Check your inbox' }}</h2>
         <p class="text-sm text-muted-foreground">
-          We sent a verification link to <strong class="text-foreground">{{ form.email }}</strong>.
-          Click it to activate your account and sign in.
+          <template v-if="resent">
+            Your account already exists but is not verified. We sent a fresh verification link to
+            <strong class="text-foreground">{{ form.email }}</strong>.
+            Click it to activate your account and sign in.
+          </template>
+          <template v-else>
+            We sent a verification link to <strong class="text-foreground">{{ form.email }}</strong>.
+            Click it to activate your account and sign in.
+          </template>
         </p>
         <NuxtLink to="/login" class="block text-sm text-moltbook-teal hover:underline mt-4">
           Back to Sign In

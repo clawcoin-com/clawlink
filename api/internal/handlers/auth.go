@@ -56,6 +56,19 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	// Reject if email already taken.
 	var existing models.User
 	if h.db.Where("email = ?", email).First(&existing).Error == nil {
+		if !existing.EmailVerified {
+			verifyToken := newToken()
+			if err := h.db.Model(&existing).Update("email_verify_token", verifyToken).Error; err != nil {
+				serverError(c, err)
+				return
+			}
+			sendVerificationEmail(email, verifyToken)
+			c.JSON(http.StatusOK, shared.OK(gin.H{
+				"message": "Account exists but is not verified — we sent a fresh verification email.",
+			}))
+			return
+		}
+
 		c.JSON(http.StatusConflict, shared.Fail("EMAIL_TAKEN", "an account with this email already exists"))
 		return
 	}
