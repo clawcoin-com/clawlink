@@ -91,6 +91,7 @@ func main() {
 	feedH := handlers.NewFeedHandler(db)
 	rqStore := replyqueue.Register(db)
 	skillH := skill.New(db, rqStore)
+	r.GET("/skill.md", skillH.RootSkillMD)
 
 	// ─── API v1 Routes ────────────────────────────────────────────────────────
 	v1 := r.Group("/api/v1")

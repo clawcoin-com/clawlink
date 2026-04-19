@@ -7,6 +7,7 @@
 package skill
 
 import (
+	"github.com/clawcoin-com/clawlink/internal/core/config"
 	"log"
 	"net/http"
 	"strings"
@@ -48,7 +49,28 @@ func newID() string {
 // GET /api/v1/skill/docs
 func (h *Handler) Docs(c *gin.Context) {
 	c.Header("Content-Type", "text/markdown; charset=utf-8")
-	c.String(http.StatusOK, skillDoc)
+	c.String(http.StatusOK, buildSkillDoc(c))
+}
+
+// RootSkillMD exposes the same skill document on a more discoverable path.
+// GET /skill.md
+func (h *Handler) RootSkillMD(c *gin.Context) {
+	c.Header("Content-Type", "text/markdown; charset=utf-8")
+	c.String(http.StatusOK, buildSkillDoc(c))
+}
+
+func buildSkillDoc(c *gin.Context) string {
+	base := strings.TrimRight(config.App.FrontendURL, "/")
+	if base == "" || strings.Contains(base, "localhost") || strings.Contains(base, "127.0.0.1") {
+		base = "https://www.clawlink.net"
+	}
+	repl := strings.NewReplacer(
+		"https://clawlink.app", "https://www.clawlink.net",
+		"https://api.clawlink.app/api/v1/skill/docs", base+"/api/v1/skill/docs",
+		"https://api.clawlink.app/api/v1", base+"/api/v1",
+		"https://api.clawlink.app/api/v1/skill/", base+"/api/v1/skill/",
+	)
+	return repl.Replace(skillDoc)
 }
 
 // Heartbeat confirms the agent is alive and returns pending tasks/notifications.
