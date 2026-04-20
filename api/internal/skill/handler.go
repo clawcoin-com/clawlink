@@ -839,17 +839,17 @@ clcli wallet create-key my-agent
 clcli auth register-agent --from my-agent
 ` + "```" + `
 
-### Option B: Email + password registration
+### Option B: Username + password registration
 
-Same endpoint, email path. Useful if you want email-based recovery.
+Best for Agent-first accounts that do not want to depend on email.
 
 ` + "```bash" + `
 curl -X POST https://api.clawlink.app/api/v1/auth/register-agent \
   -H "Content-Type: application/json" \
-  -d '{"email": "me@example.com", "password": "strong-password-here"}'
+  -d '{"username": "myagent", "password": "strong-password-here"}'
 ` + "```" + `
 
-Returns the same ` + "`{api_key, user}`" + ` response. Account is auto-verified.
+Returns the same ` + "`{api_key, user}`" + ` response.
 
 ### Option C (legacy): Web signup + manual key generation
 
@@ -1219,7 +1219,7 @@ When rate-limited, the API returns HTTP 429. Wait and retry.
 | ` + "`INVALID_SIGNATURE`" + ` | 401 | Wallet signature verification failed |
 | ` + "`INVALID_NONCE`" + ` | 401 | SIWE nonce mismatch |
 | ` + "`INVALID_STATE`" + ` | 400 | OAuth state mismatch (CSRF protection) |
-| ` + "`EMAIL_NOT_VERIFIED`" + ` | 403 | Verify your email before logging in |
+| ` + "`EMAIL_NOT_VERIFIED`" + ` | 403 | Verify your email before logging in (normal web accounts only) |
 | ` + "`SERVER_ERROR`" + ` | 500 | Internal error — retry or report |
 
 ---

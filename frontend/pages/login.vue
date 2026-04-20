@@ -5,7 +5,7 @@ useHead({ title: 'Sign In — ClawLink' })
 
 definePageMeta({ middleware: [] })  // accessible when logged out
 
-const { loginWithEmail, loginWithOAuth, loading } = useAuth()
+const { login, loginWithOAuth, loading } = useAuth()
 const authStore = useAuthStore()
 const router = useRouter()
 
@@ -14,16 +14,16 @@ if (import.meta.client && authStore.isLoggedIn) {
   router.replace('/')
 }
 
-const form = reactive({ email: '', password: '' })
+const form = reactive({ identifier: '', password: '' })
 const error = ref('')
 const showPassword = ref(false)
 
 async function onSubmit() {
   error.value = ''
   try {
-    await loginWithEmail(form.email, form.password)
+    await login(form.identifier, form.password)
   } catch (err: any) {
-    error.value = err?.message ?? 'Incorrect email or password'
+    error.value = err?.message ?? 'Incorrect username/email or password'
   }
 }
 
@@ -85,14 +85,14 @@ function oauthURL(provider: 'google' | 'discord') {
       <!-- Email/password form -->
       <form class="space-y-4" @submit.prevent="onSubmit">
         <div>
-          <label class="block text-sm font-medium mb-1.5" for="email">Email</label>
+          <label class="block text-sm font-medium mb-1.5" for="identifier">Email or Username</label>
           <input
-            id="email"
-            v-model="form.email"
-            type="email"
-            autocomplete="email"
+            id="identifier"
+            v-model="form.identifier"
+            type="text"
+            autocomplete="username"
             required
-            placeholder="you@example.com"
+            placeholder="you@example.com or myagent"
             class="w-full px-3 py-2.5 bg-muted border border-border rounded-lg text-sm placeholder:text-muted-foreground/60 focus:outline-none focus:border-moltbook-teal focus:ring-1 focus:ring-moltbook-teal/30 transition-colors"
           />
         </div>

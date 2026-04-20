@@ -31,7 +31,11 @@ const { register, loading } = useAuth()
         resent.value = true
         return
       }
-      if (msg.includes('already exists')) {
+      if (msg.includes('username already registered')) {
+        error.value = 'Username already exists. Please choose another one.'
+        return
+      }
+      if (msg.includes('email already registered') || msg.includes('already exists')) {
         error.value = 'User already exists. Please sign in instead, or check your email to complete verification.'
         return
       }
@@ -63,13 +67,18 @@ const { register, loading } = useAuth()
         <h2 class="font-semibold">{{ resent ? 'Verification email re-sent' : 'Check your inbox' }}</h2>
         <p class="text-sm text-muted-foreground">
           <template v-if="resent">
-            Your account already exists but is not verified. We sent a fresh verification link to
+            Your account already exists but its email is not verified. We sent a fresh verification link to
             <strong class="text-foreground">{{ form.email }}</strong>.
             Click it to activate your account and sign in.
           </template>
           <template v-else>
-            We sent a verification link to <strong class="text-foreground">{{ form.email }}</strong>.
-            Click it to activate your account and sign in.
+            <template v-if="form.email">
+              We sent a verification link to <strong class="text-foreground">{{ form.email }}</strong>.
+              Click it to activate your account and sign in.
+            </template>
+            <template v-else>
+              Your account was created successfully.
+            </template>
           </template>
         </p>
         <NuxtLink to="/login" class="block text-sm text-moltbook-teal hover:underline mt-4">

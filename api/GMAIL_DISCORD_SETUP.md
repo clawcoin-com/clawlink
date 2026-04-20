@@ -1,28 +1,37 @@
-# Gmail / Google / Discord 配置指引
+# Gmail / Google / Discord Configuration Guide
 
-这份文档只说明当前 `api` 项目里，Gmail、Google OAuth、Discord OAuth 应该在哪处理，以及上线前必须检查的点。
+This document explains where Gmail/SMTP, Google OAuth, and Discord OAuth are
+handled inside the current `api` project, and what must be checked before
+deployment.
 
-## 先说结论
+## Quick Summary
 
-- 如果你说的 `gmail` 是“发注册验证邮件”:
-  处理位置在 `api/internal/handlers/auth.go` 的 `sendVerificationEmail()`
-- 如果你说的 `gmail` 是“用 Google 账号登录”:
-  处理位置也在 `api/internal/handlers/auth.go`，走 `google` OAuth 分支
-- 如果你说的 `dc` 是 Discord:
-  当前项目里对应的是 Discord OAuth，处理位置同样在 `api/internal/handlers/auth.go`
-- 所有配置值都从环境变量进入，统一读取入口在 `api/internal/core/config/config.go`
-- Docker 启动时，`api` 服务会读取 `api/.env`，见项目根目录 `docker-compose.yml`
-- API 域名现在也已支持变量配置，使用 `API_BASE_URL`
+- If by **Gmail** you mean **sending verification emails after registration**:
+  the implementation lives in `api/internal/handlers/auth.go`, inside
+  `sendVerificationEmail()`.
+- If by **Gmail** you actually mean **Google account sign-in**:
+  the implementation also lives in `api/internal/handlers/auth.go`, under the
+  `google` OAuth branch.
+- If by **dc** you mean **Discord**:
+  the implementation is Discord OAuth, also handled in
+  `api/internal/handlers/auth.go`.
+- All related configuration values come from environment variables. The central
+  config loader is `api/internal/core/config/config.go`.
+- When started with Docker, the `api` service reads values from `api/.env`
+  (see the root `docker-compose.yml`).
+- Public callback / verification URLs are controlled through `API_BASE_URL`.
 
-## 当前代码里的关键位置
+---
 
-### 1. 环境变量入口
+## Key Code Locations
 
-文件:
+### 1. Environment Variable Entry Point
+
+File:
 
 - `api/internal/core/config/config.go`
 
-这里已经支持下面这些变量:
+The current config loader supports these variables:
 
 - `API_BASE_URL`
 - `FRONTEND_URL`
@@ -36,13 +45,13 @@
 - `SMTP_PASS`
 - `SMTP_FROM`
 
-### 2. 路由入口
+### 2. Auth Route Entry Points
 
-文件:
+File:
 
 - `api/cmd/server/main.go`
 
-已经注册的认证相关路由:
+Registered auth-related routes include:
 
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
@@ -50,33 +59,36 @@
 - `GET /api/v1/auth/oauth/:provider`
 - `GET /api/v1/auth/oauth/:provider/callback`
 
-其中 `:provider` 目前支持:
+Currently supported providers:
 
 - `google`
 - `discord`
 
-### 3. 邮件发送逻辑
+### 3. Verification Email Sending Logic
 
-文件:
+File:
 
 - `api/internal/handlers/auth.go`
 
-关键函数:
+Key function:
 
 - `sendVerificationEmail(email, token string)`
 
-当前行为:
+Current behavior:
 
-- `SMTP_HOST` 为空时，不发邮件，只把验证链接打印到日志
-- `SMTP_HOST` 有值时，使用 `net/smtp` 发送验证邮件
+- If `SMTP_HOST` is empty, no email is sent; the verification link is logged
+  to the server logs.
+- If `SMTP_HOST` is set, the API sends a verification email through SMTP.
+- The current implementation uses explicit SMTP negotiation with
+  `STARTTLS/TLS + AUTH + DATA`, not the old bare `smtp.SendMail(...)` path.
 
-### 4. Google / Discord OAuth 逻辑
+### 4. Google / Discord OAuth Logic
 
-文件:
+File:
 
 - `api/internal/handlers/auth.go`
 
-关键函数:
+Key functions:
 
 - `OAuthRedirect`
 - `OAuthCallback`
@@ -85,28 +97,34 @@
 - `exchangeDiscordCode`
 - `fetchDiscordUserInfo`
 
-### 5. 前端登录回跳页
+### 5. Frontend Auth Callback Page
 
-文件:
+File:
 
 - `frontend/pages/auth/callback.vue`
 
-说明:
+Current behavior:
 
-- 邮箱验证成功后，后端会跳到前端 `/auth/callback?code=...`，前端再用一次性 code 换取 JWT
-- Google / Discord OAuth 成功后，也会跳到这个页面
+- After successful email verification, the backend redirects to the frontend
+  callback page with `?code=...`, and the frontend exchanges that one-time code
+  for a JWT.
+- After successful Google / Discord OAuth, the backend redirects to the same
+  frontend callback page.
 
-## 你应该改哪里
+---
 
-### A. 配 Gmail 发信
+## What You Need To Configure
 
-如果目标是“注册后发验证邮件”，你主要处理:
+### A. Configure Gmail / SMTP Email Sending
+
+If your goal is **sending verification emails after registration**, the main
+files involved are:
 
 - `api/.env`
 - `api/internal/core/config/config.go`
 - `api/internal/handlers/auth.go`
 
-实际配置写在 `api/.env`，示例:
+Example configuration in `api/.env`:
 
 ```env
 API_BASE_URL=http://localhost:8080
@@ -119,21 +137,22 @@ SMTP_PASS=your_gmail_app_password
 SMTP_FROM=your_account@gmail.com
 ```
 
-注意:
+Notes:
 
-- Gmail 通常不能直接用邮箱登录密码，应该使用 App Password
-- 当前代码使用 `smtp.PlainAuth`，因此推荐走 `587` + TLS/STARTTLS 场景
-- 这部分现在只是“SMTP 发信”，不是 Google OAuth 登录
+- Gmail usually does **not** allow your normal mailbox password for SMTP.
+  Use a Gmail **App Password** instead.
+- The current code path is designed for **587 + STARTTLS/TLS**.
+- This is only about **SMTP mail delivery**, not Google OAuth login.
 
-## B. 配 Google 登录
+### B. Configure Google Sign-In
 
-如果你的“gmail”实际是“Google 账号登录”，你主要处理:
+If by “gmail” you actually mean **Google account sign-in**, the main files are:
 
 - `api/.env`
 - `api/internal/core/config/config.go`
 - `api/internal/handlers/auth.go`
 
-环境变量:
+Example environment variables:
 
 ```env
 API_BASE_URL=http://localhost:8080
@@ -142,26 +161,26 @@ GOOGLE_CLIENT_SECRET=your_google_client_secret
 FRONTEND_URL=http://localhost:3000
 ```
 
-当前后端登录入口:
+Current backend login entrypoint:
 
 ```text
 GET /api/v1/auth/oauth/google
 ```
 
-Google OAuth 回调地址要和代码保持一致:
+The Google OAuth callback must match the backend logic exactly:
 
-- 本地开发: `http://localhost:8080/api/v1/auth/oauth/google/callback`
-- 生产环境: `<API_BASE_URL>/api/v1/auth/oauth/google/callback`
+- Local development: `http://localhost:8080/api/v1/auth/oauth/google/callback`
+- Production: `<API_BASE_URL>/api/v1/auth/oauth/google/callback`
 
-## C. 配 Discord 登录
+### C. Configure Discord Sign-In
 
-如果你的 `dc` 指 Discord，你主要处理:
+If `dc` means **Discord**, the main files are:
 
 - `api/.env`
 - `api/internal/core/config/config.go`
 - `api/internal/handlers/auth.go`
 
-环境变量:
+Example environment variables:
 
 ```env
 API_BASE_URL=http://localhost:8080
@@ -170,20 +189,23 @@ DISCORD_CLIENT_SECRET=your_discord_client_secret
 FRONTEND_URL=http://localhost:3000
 ```
 
-当前后端登录入口:
+Current backend login entrypoint:
 
 ```text
 GET /api/v1/auth/oauth/discord
 ```
 
-Discord OAuth 回调地址要和代码保持一致:
+The Discord OAuth callback must match the backend logic exactly:
 
-- 本地开发: `http://localhost:8080/api/v1/auth/oauth/discord/callback`
-- 生产环境: `<API_BASE_URL>/api/v1/auth/oauth/discord/callback`
+- Local development: `http://localhost:8080/api/v1/auth/oauth/discord/callback`
+- Production: `<API_BASE_URL>/api/v1/auth/oauth/discord/callback`
 
-## `api/.env` 建议补齐的配置块
+---
 
-当前仓库的 `api/.env.example` 里还没有把这些变量列全，实际使用时建议在 `api/.env` 至少补上:
+## Recommended `api/.env` Block
+
+`api/.env.example` may not list every variable you need. In practice, you
+should define at least the following in `api/.env`:
 
 ```env
 # API
@@ -208,53 +230,68 @@ SMTP_PASS=
 SMTP_FROM=noreply@clawlink.app
 ```
 
-## 现在的地址配置方式
+---
 
-邮件验证链接基础地址和 OAuth callback 基础地址现在都走:
+## Current URL Configuration Model
+
+The base URL for both:
+
+- email verification links
+- OAuth callback links
+
+is now controlled by:
 
 ```env
 API_BASE_URL=https://your-api-domain.com
 ```
 
-对应代码:
+Related code paths:
 
 - `oauthCallbackURL()`
 - `sendVerificationEmail()`
 
-如果你的线上 API 域名不是默认值，只需要改 `api/.env` 里的 `API_BASE_URL`。
+If your production API domain is not the default, changing `API_BASE_URL` in
+`api/.env` is the correct fix.
 
-## 本地开发怎么判断是否生效
+---
 
-### 验证 Gmail SMTP
+## How To Verify It Locally
 
-- 调用注册接口 `POST /api/v1/auth/register`
-- 如果 `SMTP_HOST` 为空，终端日志会输出验证链接
-- 如果 `SMTP_HOST` 已配置，应该实际收到验证邮件
+### Verify Gmail / SMTP
 
-### 验证 Google OAuth
+- Call `POST /api/v1/auth/register`
+- If `SMTP_HOST` is empty, the server logs will print the verification link
+- If `SMTP_HOST` is configured correctly, you should receive a real
+  verification email
 
-- 打开 `GET /api/v1/auth/oauth/google`
-- 应该跳转到 Google 授权页
-- 完成后会回到前端 `/auth/callback`
+### Verify Google OAuth
 
-### 验证 Discord OAuth
+- Open `GET /api/v1/auth/oauth/google`
+- It should redirect to Google’s consent screen
+- After completion, it should return to the frontend `/auth/callback`
 
-- 打开 `GET /api/v1/auth/oauth/discord`
-- 应该跳转到 Discord 授权页
-- 完成后会回到前端 `/auth/callback`
+### Verify Discord OAuth
 
-## 推荐的处理顺序
+- Open `GET /api/v1/auth/oauth/discord`
+- It should redirect to Discord’s consent screen
+- After completion, it should return to the frontend `/auth/callback`
 
-1. 先在 `api/.env` 补齐 `FRONTEND_URL`、SMTP、Google、Discord 变量
-2. 确认你的真实前后端域名
-3. 配好 `API_BASE_URL`
-4. 再去 Google Console 和 Discord Developer Portal 填对应回调地址
-5. 最后分别测试邮件验证、Google 登录、Discord 登录
+---
 
-## 一句话判断
+## Recommended Order Of Work
 
-- 发 Gmail 邮件: 重点看 `sendVerificationEmail()`
-- Google 登录: 重点看 `OAuthRedirect/OAuthCallback` 的 `google` 分支
-- Discord 登录: 重点看 `OAuthRedirect/OAuthCallback` 的 `discord` 分支
-- 统一配置入口: `config.go`
-- 统一实际填写位置: `api/.env`
+1. Fill in `FRONTEND_URL`, SMTP, Google, and Discord variables in `api/.env`
+2. Confirm your real frontend and API domains
+3. Set `API_BASE_URL`
+4. Register the matching callback URLs in Google Console and Discord Developer Portal
+5. Test email verification, Google login, and Discord login separately
+
+---
+
+## One-Line Decision Guide
+
+- **Send Gmail/SMTP email** → focus on `sendVerificationEmail()`
+- **Google login** → focus on the `google` branch in `OAuthRedirect/OAuthCallback`
+- **Discord login** → focus on the `discord` branch in `OAuthRedirect/OAuthCallback`
+- **Central config loader** → `config.go`
+- **Actual values to edit** → `api/.env`

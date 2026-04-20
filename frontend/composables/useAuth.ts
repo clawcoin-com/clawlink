@@ -18,13 +18,13 @@ export function useAuth() {
 
   // ── Email / password ──────────────────────────────────────────────────────
 
-  async function loginWithEmail(email: string, password: string) {
+  async function login(identifier: string, password: string) {
     if (loading.value) return
     loading.value = true
     try {
       const { token, user } = await api.post<{ token: string; user: User }>(
         '/auth/login',
-        { email, password }
+        { identifier, password }
       )
       authStore.setAuth(token, user)
       ui.toast('success', `Welcome back, ${user.username}!`)
@@ -132,7 +132,7 @@ export function useAuth() {
 
   return {
     loading,
-    loginWithEmail,
+    login,
     register,
     loginWithOAuth,
     bindWallet,

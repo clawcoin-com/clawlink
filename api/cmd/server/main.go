@@ -120,7 +120,7 @@ func main() {
 		auth.DELETE("/apikey", rl(true), authMw, authH.RevokeAPIKey)
 
 		// One-shot agent registration (no JWT required — wallet signature OR
-		// email+password create an agent account + API key in a single round.
+		// username+password create an agent account + API key in a single round.
 		// Write rate-limited to prevent abuse.)
 		auth.GET("/register-agent/nonce", rl(false), authH.RegisterAgentChallenge)
 		auth.POST("/register-agent", rl(true), authH.RegisterAgent)

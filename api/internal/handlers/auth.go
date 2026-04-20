@@ -108,34 +108,44 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}))
 }
 
-// Login authenticates with email + password and returns a JWT.
+// Login authenticates with username OR email + password and returns a JWT.
 // POST /api/v1/auth/login
 //
-// Body: { "email": "user@example.com", "password": "..." }
+// Body: { "identifier": "user@example.com | username", "password": "..." }
+// Backward compatibility: { "email": "...", "password": "..." } is also accepted.
 func (h *AuthHandler) Login(c *gin.Context) {
 	var body struct {
-		Email    string `json:"email"    binding:"required"`
-		Password string `json:"password" binding:"required"`
+		Identifier string `json:"identifier"`
+		Email      string `json:"email"`
+		Password   string `json:"password" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		badRequest(c, err.Error())
 		return
 	}
 
-	email := strings.ToLower(strings.TrimSpace(body.Email))
+	identifier := strings.TrimSpace(body.Identifier)
+	if identifier == "" {
+		identifier = strings.TrimSpace(body.Email)
+	}
+	if identifier == "" {
+		badRequest(c, "identifier is required")
+		return
+	}
+	normalizedEmail := strings.ToLower(identifier)
 	var user models.User
-	if err := h.db.Where("email = ?", email).First(&user).Error; err != nil {
+	if err := h.db.Where("email = ? OR username = ?", normalizedEmail, identifier).First(&user).Error; err != nil {
 		// Generic message to prevent user enumeration.
-		c.JSON(http.StatusUnauthorized, shared.Fail("INVALID_CREDENTIALS", "incorrect email or password"))
+		c.JSON(http.StatusUnauthorized, shared.Fail("INVALID_CREDENTIALS", "incorrect username/email or password"))
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(body.Password)); err != nil {
-		c.JSON(http.StatusUnauthorized, shared.Fail("INVALID_CREDENTIALS", "incorrect email or password"))
+		c.JSON(http.StatusUnauthorized, shared.Fail("INVALID_CREDENTIALS", "incorrect username/email or password"))
 		return
 	}
 
-	if !user.EmailVerified {
+	if user.Email != nil && !user.EmailVerified && !user.IsAgent {
 		c.JSON(http.StatusForbidden, shared.Fail("EMAIL_NOT_VERIFIED", "please verify your email before logging in"))
 		return
 	}
@@ -721,28 +731,41 @@ func (h *AuthHandler) RegisterAgentChallenge(c *gin.Context) {
 //     /auth/register-agent/nonce. Signature proves control of the wallet's
 //     private key (EIP-191 personal_sign).
 //
-//   - **Email/password (fallback)**: {email, password}
-//     For agent developers who want email recovery. Auto-verified (no email
-//     confirmation required — the registration itself is a deliberate action).
-//     Username may be provided; otherwise derived from email.
+//   - **Username/password (agent-first)**: {username, password}
+//     Agent accounts do not require email at registration time.
 //
 // Response returns the plain-text `api_key` ONE TIME. Store it safely.
 //
 // POST /api/v1/auth/register-agent
 func (h *AuthHandler) RegisterAgent(c *gin.Context) {
+	var raw map[string]json.RawMessage
+	if err := c.ShouldBindJSON(&raw); err != nil {
+		badRequest(c, err.Error())
+		return
+	}
+	if _, hasEmail := raw["email"]; hasEmail {
+		badRequest(c, "email is not allowed in register-agent")
+		return
+	}
+
+	rawBody, err := json.Marshal(raw)
+	if err != nil {
+		serverError(c, err)
+		return
+	}
+
 	var body struct {
 		// Wallet path
 		Wallet    string `json:"wallet"`
 		Challenge string `json:"challenge"`
 		Signature string `json:"signature"`
-		// Email path
-		Email    string `json:"email"`
+		// Username path
+		Username string `json:"username"`
 		Password string `json:"password"`
-		// Optional (both paths)
-		Username    string `json:"username"`
+		// Optional (all paths)
 		DisplayName string `json:"display_name"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil {
+	if err := json.Unmarshal(rawBody, &body); err != nil {
 		badRequest(c, err.Error())
 		return
 	}
@@ -804,11 +827,15 @@ func (h *AuthHandler) RegisterAgent(c *gin.Context) {
 			Nonce:         newNonce(),
 		}
 
-	case body.Email != "":
-		// ─── Email path ────────────────────────────────────────────────────
-		email := strings.ToLower(strings.TrimSpace(body.Email))
-		if !strings.Contains(email, "@") {
-			badRequest(c, "email is not valid")
+	case body.Username != "":
+		// ─── Username path ────────────────────────────────────────────────
+		username := strings.TrimSpace(body.Username)
+		if username == "" {
+			badRequest(c, "username is required when registering an agent without wallet")
+			return
+		}
+		if len(username) < 3 || len(username) > 50 {
+			badRequest(c, "username must be between 3 and 50 characters")
 			return
 		}
 		if len(body.Password) < 8 {
@@ -817,8 +844,8 @@ func (h *AuthHandler) RegisterAgent(c *gin.Context) {
 		}
 
 		var existing models.User
-		if h.db.Where("email = ?", email).First(&existing).Error == nil {
-			c.JSON(http.StatusConflict, shared.Fail("EMAIL_TAKEN", "email already registered"))
+		if h.db.Where("username = ?", username).First(&existing).Error == nil {
+			c.JSON(http.StatusConflict, shared.Fail("USERNAME_TAKEN", "username already registered"))
 			return
 		}
 
@@ -828,10 +855,6 @@ func (h *AuthHandler) RegisterAgent(c *gin.Context) {
 			return
 		}
 
-		username := body.Username
-		if username == "" {
-			username = deriveAgentUsername(h.db, email)
-		}
 		displayName := body.DisplayName
 		if displayName == "" {
 			displayName = username
@@ -841,15 +864,14 @@ func (h *AuthHandler) RegisterAgent(c *gin.Context) {
 			ID:            newUserID(),
 			Username:      username,
 			DisplayName:   displayName,
-			Email:         &email,
 			PasswordHash:  string(hash),
-			EmailVerified: true, // agent path skips email confirmation
+			EmailVerified: true,
 			IsAgent:       true,
 			Nonce:         newNonce(),
 		}
 
 	default:
-		badRequest(c, "provide either {wallet, challenge, signature} or {email, password}")
+		badRequest(c, "provide either {wallet, challenge, signature} or {username, password}")
 		return
 	}
 
