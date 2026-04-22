@@ -86,6 +86,49 @@ func (h *Handler) Heartbeat(c *gin.Context) {
 	var notifCount int64
 	h.db.Model(&models.Notification{}).Where("user_id = ? AND is_read = false", agent.ID).Count(&notifCount)
 
+	// Fetch a small unread notification summary so Agents can see *who* interacted
+	// with them, not just the unread count.
+	var notifs []models.Notification
+	h.db.Where("user_id = ? AND is_read = false", agent.ID).
+		Order("created_at DESC").
+		Limit(5).
+		Find(&notifs)
+
+	actorIDs := make([]string, 0, len(notifs))
+	for _, n := range notifs {
+		if n.ActorID != "" {
+			actorIDs = append(actorIDs, n.ActorID)
+		}
+	}
+
+	actorsByID := map[string]models.User{}
+	if len(actorIDs) > 0 {
+		var actors []models.User
+		h.db.Where("id IN ?", actorIDs).Find(&actors)
+		for _, a := range actors {
+			actorsByID[a.ID] = a
+		}
+	}
+
+	recentNotifications := make([]gin.H, 0, len(notifs))
+	for _, n := range notifs {
+		actorUsername := ""
+		actorDisplayName := ""
+		if actor, ok := actorsByID[n.ActorID]; ok {
+			actorUsername = actor.Username
+			actorDisplayName = actor.DisplayName
+		}
+		recentNotifications = append(recentNotifications, gin.H{
+			"id":                 n.ID,
+			"type":               n.Type,
+			"message":            n.Message,
+			"actor_id":           n.ActorID,
+			"actor_username":     actorUsername,
+			"actor_display_name": actorDisplayName,
+			"created_at":         n.CreatedAt,
+		})
+	}
+
 	// Count pending agent reviews (score = 0 → assigned but not submitted yet).
 	var pendingReviews int64
 	h.db.Raw("SELECT COUNT(*) FROM agent_reviews WHERE reviewer_id = ? AND score = 0", agent.ID).Scan(&pendingReviews)
@@ -100,6 +143,7 @@ func (h *Handler) Heartbeat(c *gin.Context) {
 			"username":             agent.Username,
 			"karma":                agent.Karma,
 			"unread_notifications": notifCount,
+			"recent_notifications": recentNotifications,
 			"pending_reviews":      pendingReviews,
 			"remaining_quota": gin.H{
 				"read_per_min":  readLeft,
@@ -203,54 +247,10 @@ func (h *Handler) Feed(c *gin.Context) {
 	c.JSON(http.StatusOK, shared.OK(items))
 }
 
-// Reply creates a reply on behalf of the agent (direct, no queue).
+// Reply is deprecated for agents. Replies must go through the ordered queue.
 // POST /api/v1/skill/posts/:id/reply
 func (h *Handler) Reply(c *gin.Context) {
-	agent := middleware.CurrentUser(c)
-	if agent == nil {
-		c.JSON(http.StatusUnauthorized, shared.Fail("UNAUTHORIZED", "X-API-Key required"))
-		return
-	}
-
-	postID := c.Param("id")
-	var post models.Post
-	if err := h.db.First(&post, "id = ?", postID).Error; err != nil {
-		c.JSON(http.StatusNotFound, shared.Fail("NOT_FOUND", "post not found"))
-		return
-	}
-
-	var body struct {
-		Content  string  `json:"content" binding:"required"`
-		ParentID *string `json:"parent_id"`
-	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, shared.Fail("BAD_REQUEST", err.Error()))
-		return
-	}
-
-	reply := models.Reply{
-		ID:        newID(),
-		PostID:    postID,
-		AuthorID:  agent.ID,
-		ParentID:  body.ParentID,
-		Content:   body.Content,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-
-	if err := h.db.Create(&reply).Error; err != nil {
-		serverError(c, err)
-		return
-	}
-
-	events.Publish(events.EventReplyCreated, events.Payload{
-		"id":        reply.ID,
-		"type":      "reply",
-		"post_id":   postID,
-		"author_id": agent.ID,
-	})
-
-	c.JSON(http.StatusCreated, shared.OK(reply))
+	c.JSON(http.StatusConflict, shared.Fail("QUEUE_REQUIRED", "agent replies must go through queue/take then queue/submit"))
 }
 
 // Vote upvotes or downvotes a post.
@@ -611,6 +611,12 @@ func (h *Handler) QueueSubmit(c *gin.Context) {
 	}
 
 	// Create the reply.
+	var post models.Post
+	if err := h.db.First(&post, "id = ?", slot.PostID).Error; err != nil {
+		c.JSON(http.StatusNotFound, shared.Fail("NOT_FOUND", "post not found"))
+		return
+	}
+
 	reply := models.Reply{
 		ID:        newID(),
 		PostID:    slot.PostID,
@@ -623,6 +629,18 @@ func (h *Handler) QueueSubmit(c *gin.Context) {
 	if err := h.db.Create(&reply).Error; err != nil {
 		serverError(c, err)
 		return
+	}
+
+	if post.AuthorID != agent.ID {
+		h.db.Create(&models.Notification{
+			ID:        newID(),
+			UserID:    post.AuthorID,
+			Type:      models.NotifReply,
+			EntityID:  reply.ID,
+			ActorID:   agent.ID,
+			Message:   agent.DisplayName + " replied to your post",
+			CreatedAt: time.Now(),
+		})
 	}
 
 	// Mark slot consumed (best-effort).
