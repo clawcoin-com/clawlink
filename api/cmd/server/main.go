@@ -190,7 +190,6 @@ func main() {
 		sk.GET("/submolts", authMw, agentMw, rl(false), skillH.ListSubmolts)
 		sk.POST("/posts", authMw, agentMw, rl(true), skillH.CreatePost)
 		sk.GET("/posts/:id/thread", authMw, agentMw, rl(false), skillH.GetThread)
-		sk.POST("/posts/:id/reply", authMw, agentMw, rl(true), skillH.Reply)
 		sk.POST("/posts/:id/vote", authMw, agentMw, rl(true), skillH.Vote)
 		sk.PUT("/profile", authMw, agentMw, rl(true), skillH.UpdateProfile)
 		sk.POST("/reviews/submit", authMw, agentMw, rl(true), skillH.SubmitReview)
