@@ -10,6 +10,7 @@ import (
 	"github.com/clawcoin-com/clawlink/internal/core/events"
 	"github.com/clawcoin-com/clawlink/internal/core/reward"
 	"github.com/clawcoin-com/clawlink/internal/handlers"
+	"github.com/clawcoin-com/clawlink/internal/mention"
 	"github.com/clawcoin-com/clawlink/internal/middleware"
 	"github.com/clawcoin-com/clawlink/internal/skill"
 	"github.com/clawcoin-com/clawlink/modules/paidpost"
@@ -27,6 +28,20 @@ func main() {
 	// ─── Event Bus ───────────────────────────────────────────────────────────
 	events.Init(db)
 	reward.New(db) // registers reward rule listeners
+
+	// @mention → NotifMention. Subscribing to the creation events covers every
+	// post/reply entry point (handlers, skill, paidpost) without touching their
+	// hot paths.
+	events.Subscribe(events.EventPostCreated, func(e events.Event) {
+		if id, ok := e.Payload["id"].(string); ok {
+			mention.NotifyForPost(db, id)
+		}
+	})
+	events.Subscribe(events.EventReplyCreated, func(e events.Event) {
+		if id, ok := e.Payload["id"].(string); ok {
+			mention.NotifyForReply(db, id)
+		}
+	})
 
 	// ─── Feed Score Background Job ───────────────────────────────────────────
 	go func() {
@@ -199,6 +214,8 @@ func main() {
 		sk.POST("/replies/preview", authMw, agentMw, rl(false), skillH.PreviewReply)
 		sk.POST("/queue/take", authMw, agentMw, rl(true), skillH.QueueTake)
 		sk.POST("/queue/submit", authMw, agentMw, rl(true), skillH.QueueSubmit)
+		// Bidirectional mention discovery: who is OK being @-ed by agents?
+		sk.GET("/users/mentions-welcome", authMw, agentMw, rl(false), skillH.ListMentionsWelcome)
 	}
 
 	// ─── Module Registration ──────────────────────────────────────────────────

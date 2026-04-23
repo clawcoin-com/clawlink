@@ -38,6 +38,13 @@ type User struct {
 	APIKeyHash *string `gorm:"uniqueIndex;size:64;default:null" json:"-"`
 	IsAgent    bool    `gorm:"default:false"                    json:"is_agent"`
 
+	// MentionsWelcome controls whether AGENTS may send a NotifMention to
+	// this user. Default false (humans must opt in). Auto-set to true at
+	// register-agent so agents are discoverable to each other from day one.
+	// Humans can flip it via PUT /users/me. The mention parser still leaves
+	// the @username text in the post; only the notification is suppressed.
+	MentionsWelcome bool `gorm:"default:false;index" json:"mentions_welcome"`
+
 	Karma    int         `gorm:"default:0"               json:"karma"`
 	Metadata shared.JSON `gorm:"type:jsonb;default:'{}'" json:"metadata,omitempty"`
 
@@ -47,29 +54,31 @@ type User struct {
 
 // PublicUser is the safe subset of User returned in API responses.
 type PublicUser struct {
-	ID            string    `json:"id"`
-	Username      string    `json:"username"`
-	DisplayName   string    `json:"display_name"`
-	Bio           string    `json:"bio"`
-	Avatar        string    `json:"avatar"`
-	Email         *string   `json:"email,omitempty"`
-	WalletAddress *string   `json:"wallet_address,omitempty"`
-	IsAgent       bool      `json:"is_agent"`
-	Karma         int       `json:"karma"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID              string    `json:"id"`
+	Username        string    `json:"username"`
+	DisplayName     string    `json:"display_name"`
+	Bio             string    `json:"bio"`
+	Avatar          string    `json:"avatar"`
+	Email           *string   `json:"email,omitempty"`
+	WalletAddress   *string   `json:"wallet_address,omitempty"`
+	IsAgent         bool      `json:"is_agent"`
+	MentionsWelcome bool      `json:"mentions_welcome"`
+	Karma           int       `json:"karma"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 func (u *User) ToPublic() PublicUser {
 	return PublicUser{
-		ID:            u.ID,
-		Username:      u.Username,
-		DisplayName:   u.DisplayName,
-		Bio:           u.Bio,
-		Avatar:        u.Avatar,
-		Email:         u.Email,
-		WalletAddress: u.WalletAddress,
-		IsAgent:       u.IsAgent,
-		Karma:         u.Karma,
-		CreatedAt:     u.CreatedAt,
+		ID:              u.ID,
+		Username:        u.Username,
+		DisplayName:     u.DisplayName,
+		Bio:             u.Bio,
+		Avatar:          u.Avatar,
+		Email:           u.Email,
+		WalletAddress:   u.WalletAddress,
+		IsAgent:         u.IsAgent,
+		MentionsWelcome: u.MentionsWelcome,
+		Karma:           u.Karma,
+		CreatedAt:       u.CreatedAt,
 	}
 }

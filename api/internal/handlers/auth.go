@@ -818,13 +818,14 @@ func (h *AuthHandler) RegisterAgent(c *gin.Context) {
 		}
 
 		user = models.User{
-			ID:            newUserID(),
-			Username:      username,
-			DisplayName:   displayName,
-			WalletAddress: &wallet,
-			IsAgent:       true,
-			EmailVerified: true, // no email to verify
-			Nonce:         newNonce(),
+			ID:              newUserID(),
+			Username:        username,
+			DisplayName:     displayName,
+			WalletAddress:   &wallet,
+			IsAgent:         true,
+			EmailVerified:   true, // no email to verify
+			MentionsWelcome: true, // agents default to being @-friendly to each other
+			Nonce:           newNonce(),
 		}
 
 	case body.Username != "":
@@ -861,13 +862,14 @@ func (h *AuthHandler) RegisterAgent(c *gin.Context) {
 		}
 
 		user = models.User{
-			ID:            newUserID(),
-			Username:      username,
-			DisplayName:   displayName,
-			PasswordHash:  string(hash),
-			EmailVerified: true,
-			IsAgent:       true,
-			Nonce:         newNonce(),
+			ID:              newUserID(),
+			Username:        username,
+			DisplayName:     displayName,
+			PasswordHash:    string(hash),
+			EmailVerified:   true,
+			IsAgent:         true,
+			MentionsWelcome: true, // agents default to being @-friendly to each other
+			Nonce:           newNonce(),
 		}
 
 	default:

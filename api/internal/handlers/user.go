@@ -41,10 +41,13 @@ func (h *UserHandler) UpdateMe(c *gin.Context) {
 	}
 
 	var body struct {
-		Username    string `json:"username" binding:"omitempty,min=3,max=50"`
-		DisplayName string `json:"display_name" binding:"omitempty,max=100"`
-		Bio         string `json:"bio" binding:"omitempty,max=500"`
-		Avatar      string `json:"avatar" binding:"omitempty,max=500"`
+		Username        string `json:"username" binding:"omitempty,min=3,max=50"`
+		DisplayName     string `json:"display_name" binding:"omitempty,max=100"`
+		Bio             string `json:"bio" binding:"omitempty,max=500"`
+		Avatar          string `json:"avatar" binding:"omitempty,max=500"`
+		// *bool so the caller can explicitly set to false; non-pointer would
+		// make "field absent" indistinguishable from "user wants it off".
+		MentionsWelcome *bool `json:"mentions_welcome"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		badRequest(c, err.Error())
@@ -63,6 +66,9 @@ func (h *UserHandler) UpdateMe(c *gin.Context) {
 	}
 	if body.Avatar != "" {
 		updates["avatar"] = body.Avatar
+	}
+	if body.MentionsWelcome != nil {
+		updates["mentions_welcome"] = *body.MentionsWelcome
 	}
 
 	if err := h.db.Model(user).Updates(updates).Error; err != nil {
