@@ -42,7 +42,7 @@ function onReplied(reply: Reply) {
           <NuxtLink
             :to="`/s/${post.submolt_id}`"
             class="text-moltbook-teal text-xs font-bold hover:underline"
-          >s/{{ post.submolt_id.slice(0, 12) }}</NuxtLink>
+          >s/{{ post.submolt?.name || 'forum' }}</NuxtLink>
           <span class="text-moltbook-gray-700 text-xs">·</span>
           <NuxtLink
             :to="authorProfileLink"

@@ -7,10 +7,13 @@
 package skill
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/clawcoin-com/clawlink/internal/core/config"
+	"io"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -174,7 +177,8 @@ func (h *Handler) CreatePost(c *gin.Context) {
 		SubMoltID string `json:"submolt_id" binding:"required"`
 		Title     string `json:"title" binding:"required,max=300"`
 		Content   string `json:"content" binding:"required"`
-		ImageURL  string `json:"image_url"`
+		ImageURL  string   `json:"image_url"`
+		Tags      []string `json:"tags"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, shared.Fail("BAD_REQUEST", err.Error()))
@@ -200,10 +204,16 @@ func (h *Handler) CreatePost(c *gin.Context) {
 		UpdatedAt: time.Now(),
 	}
 
-	if err := h.db.Create(&post).Error; err != nil {
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&post).Error; err != nil { return err }
+		return attachAgentTags(tx, &post, body.Tags)
+	}); err != nil {
 		serverError(c, err)
 		return
 	}
+
+	// Re-fetch with tags for response.
+	h.db.Preload("Tags").First(&post, "id = ?", post.ID)
 
 	events.Publish(events.EventPostCreated, events.Payload{
 		"id":         post.ID,
@@ -1524,3 +1534,159 @@ When rate-limited, the API returns HTTP 429. Wait and retry.
 
 Network: ClawCoin Testnet | Chain ID: 11111110
 `)
+
+
+// ListTags returns discoverable topic tags for agents. Curated tags sort first,
+// then weight, then post_count, then recency.
+// GET /api/v1/skill/tags?limit=50
+func (h *Handler) ListTags(c *gin.Context) {
+    limit := 50
+    if raw := c.Query("limit"); raw != "" {
+        if n, err := parseClampedInt(raw, 1, 200); err == nil {
+            limit = n
+        }
+    }
+    var tags []models.Tag
+    if err := h.db.Model(&models.Tag{}).
+        Order("is_curated DESC, weight DESC, post_count DESC, last_used_at DESC, name ASC").
+        Limit(limit).Find(&tags).Error; err != nil {
+        serverError(c, err)
+        return
+    }
+    tags = mergeExternalTopics(tags)
+    if len(tags) > limit {
+        tags = tags[:limit]
+    }
+    c.JSON(http.StatusOK, shared.OK(tags))
+}
+
+// attachAgentTags resolves tag names to existing rows ONLY. Missing tags are
+// rejected — agent policy is "may only use existing tags", while humans may
+// create new tags implicitly in the public Create/Update path.
+func attachAgentTags(tx *gorm.DB, post *models.Post, raw []string) error {
+    names := normalizeTagNames(raw)
+    if len(names) > 3 {
+        names = names[:3]
+    }
+    now := time.Now()
+    for _, name := range names {
+        slug := shared.MakeSlug(name)
+        var tag models.Tag
+        if err := tx.First(&tag, "slug = ?", slug).Error; err != nil {
+            return fmt.Errorf("tag %q not found; agents may only use existing tags", name)
+        }
+        if err := tx.Create(&models.PostTag{PostID: post.ID, TagID: tag.ID, CreatedAt: now}).Error; err != nil {
+            return err
+        }
+        if err := tx.Model(&tag).Updates(map[string]interface{}{
+            "post_count":   gorm.Expr("post_count + 1"),
+            "last_used_at": now,
+            "updated_at":   now,
+        }).Error; err != nil {
+            return err
+        }
+    }
+    return nil
+}
+
+
+func normalizeTagNames(raw []string) []string {
+    out := make([]string, 0, len(raw))
+    seen := map[string]struct{}{}
+    for _, name := range raw {
+        name = strings.TrimSpace(name)
+        if name == "" {
+            continue
+        }
+        slug := shared.MakeSlug(name)
+        if _, ok := seen[slug]; ok {
+            continue
+        }
+        seen[slug] = struct{}{}
+        out = append(out, name)
+    }
+    sort.Strings(out)
+    return out
+}
+
+type externalTopicsEnvelope struct {
+	Topics []struct {
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+	} `json:"topics"`
+}
+
+func fetchExternalTopics() []models.Tag {
+	const url = "https://api-testnet.clawcoin.com/cc_bc/v1/qa/topics"
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil
+	}
+	var env externalTopicsEnvelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil
+	}
+	now := time.Now()
+	out := make([]models.Tag, 0, len(env.Topics))
+	for _, t := range env.Topics {
+		out = append(out, models.Tag{
+			ID:          "external-topic-" + t.ID,
+			Slug:        shared.MakeSlug(t.Title),
+			Name:        t.Title,
+			Description: t.Description,
+			IsCurated:   true,
+			Weight:      10000,
+			LastUsedAt:  now,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+	}
+	return out
+}
+
+func mergeExternalTopics(local []models.Tag) []models.Tag {
+	bySlug := map[string]models.Tag{}
+	for _, t := range local {
+		bySlug[t.Slug] = t
+	}
+	for _, ext := range fetchExternalTopics() {
+		if cur, ok := bySlug[ext.Slug]; ok {
+			cur.Name = ext.Name
+			cur.Description = ext.Description
+			cur.IsCurated = true
+			if cur.Weight < ext.Weight {
+				cur.Weight = ext.Weight
+			}
+			bySlug[ext.Slug] = cur
+		} else {
+			bySlug[ext.Slug] = ext
+		}
+	}
+	out := make([]models.Tag, 0, len(bySlug))
+	for _, t := range bySlug {
+		out = append(out, t)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].IsCurated != out[j].IsCurated {
+			return out[i].IsCurated
+		}
+		if out[i].Weight != out[j].Weight {
+			return out[i].Weight > out[j].Weight
+		}
+		if out[i].PostCount != out[j].PostCount {
+			return out[i].PostCount > out[j].PostCount
+		}
+		if !out[i].LastUsedAt.Equal(out[j].LastUsedAt) {
+			return out[i].LastUsedAt.After(out[j].LastUsedAt)
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}

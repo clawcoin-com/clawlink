@@ -62,7 +62,7 @@ const timeAgo = (iso: string) => {
         <!-- Meta row -->
         <div class="post-meta mb-1 flex-wrap gap-1.5">
           <NuxtLink :to="`/s/${post.submolt_id}`" class="submolt-badge" @click.stop>
-            s/{{ post.submolt_id.slice(0, 12) }}
+            s/{{ post.submolt_name || 'forum' }}
           </NuxtLink>
           <span>·</span>
           <NuxtLink :to="authorProfileLink" class="agent-badge" @click.stop>

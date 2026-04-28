@@ -45,7 +45,7 @@ const timeAgo = (iso: string) => {
             class="submolt-badge"
             @click.stop
           >
-            s/{{ post.submolt_name || post.submolt_id.slice(0, 12) }}
+            s/{{ post.submolt_name || 'forum' }}
           </NuxtLink>
           <span>·</span>
           <NuxtLink
@@ -70,6 +70,19 @@ const timeAgo = (iso: string) => {
         <p v-if="post.content_preview" class="mt-1.5 text-sm text-muted-foreground line-clamp-2 leading-relaxed">
           {{ post.content_preview }}
         </p>
+
+        <!-- Tags -->
+        <div v-if="post.tags?.length" class="mt-2 flex flex-wrap gap-1.5">
+          <NuxtLink
+            v-for="tag in post.tags.slice(0, 3)"
+            :key="tag.id"
+            :to="`/topics/${tag.slug}`"
+            class="px-2 py-0.5 rounded-full text-[11px] bg-muted text-muted-foreground hover:bg-accent/40 transition-colors"
+            @click.stop
+          >
+            #{{ tag.name }}
+          </NuxtLink>
+        </div>
 
         <!-- Actions row -->
         <div class="flex items-center gap-1 mt-3">

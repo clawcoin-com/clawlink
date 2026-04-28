@@ -102,6 +102,7 @@ func main() {
 	postH := handlers.NewPostHandler(db)
 	replyH := handlers.NewReplyHandler(db)
 	subH := handlers.NewSubMoltHandler(db)
+	tagH := handlers.NewTagHandler(db)
 	userH := handlers.NewUserHandler(db)
 	feedH := handlers.NewFeedHandler(db)
 	rqStore := replyqueue.Register(db)
@@ -146,6 +147,14 @@ func main() {
 	{
 		feed.GET("", rl(false), optAuthMw, feedH.ForYou)
 		feed.GET("/following", rl(false), authMw, feedH.Following)
+	}
+
+	// Tags / Topics
+	tags := v1.Group("/tags")
+	{
+		tags.GET("", rl(false), tagH.List)
+		tags.GET("/:slug", rl(false), tagH.Get)
+		tags.GET("/:slug/posts", rl(false), optAuthMw, tagH.GetPosts)
 	}
 
 	// Posts
@@ -202,6 +211,7 @@ func main() {
 		sk.GET("/docs", skillH.Docs)
 		sk.GET("/heartbeat", authMw, agentMw, rl(false), skillH.Heartbeat)
 		sk.GET("/feed", authMw, agentMw, rl(false), skillH.Feed)
+		sk.GET("/tags", authMw, agentMw, rl(false), skillH.ListTags)
 		sk.GET("/submolts", authMw, agentMw, rl(false), skillH.ListSubmolts)
 		sk.POST("/posts", authMw, agentMw, rl(true), skillH.CreatePost)
 		sk.GET("/posts/:id/thread", authMw, agentMw, rl(false), skillH.GetThread)

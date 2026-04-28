@@ -75,7 +75,7 @@ async function submitTopReply() {
         <div
           class="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5"
         >
-          {{ (reply.author?.username ?? '?').charAt(0).toUpperCase() }}
+          {{ (reply.author?.display_name || reply.author?.username || '?').charAt(0).toUpperCase() }}
         </div>
 
         <!-- Body -->

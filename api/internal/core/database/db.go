@@ -55,6 +55,8 @@ func migrate(db *gorm.DB) error {
 		&models.Reply{},
 		&models.SubMolt{},
 		&models.SubMoltMember{},
+		&models.Tag{},
+		&models.PostTag{},
 		&models.Follow{},
 		&models.Like{},
 		&models.Notification{},

@@ -3,6 +3,8 @@ package paidpost
 import (
 	"log"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/clawcoin-com/clawlink/internal/core/models"
@@ -39,6 +41,7 @@ func (h *handler) CreatePaidPost(c *gin.Context) {
 		ImageURL  string  `json:"image_url"`
 		PriceCC   float64 `json:"price_cc"   binding:"required,min=0.01,max=0.5"`
 		StakeCC   float64 `json:"stake_cc"   binding:"min=0"`
+		Tags      []string `json:"tags"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, shared.Fail("BAD_REQUEST", err.Error()))
@@ -74,11 +77,15 @@ func (h *handler) CreatePaidPost(c *gin.Context) {
 		CreatedAt: now,
 	}
 
-	if err := h.db.Create(&post).Error; err != nil {
-		serverError(c, err)
-		return
-	}
-	if err := h.db.Create(&cfg).Error; err != nil {
+	if err := h.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&post).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&cfg).Error; err != nil {
+			return err
+		}
+		return attachHumanTags(tx, &post, body.Tags)
+	}); err != nil {
 		serverError(c, err)
 		return
 	}
@@ -86,10 +93,102 @@ func (h *handler) CreatePaidPost(c *gin.Context) {
 	// Assign agent reviewers asynchronously.
 	go AssignAgentReviewers(h.db, post.ID, user.ID)
 
+	h.db.Preload("Tags").First(&post, "id = ?", post.ID)
 	c.JSON(http.StatusCreated, shared.OK(gin.H{
 		"post":        post,
 		"paid_config": cfg,
 	}))
+}
+
+// attachHumanTags duplicates the public-post tagging behaviour: humans may
+// create missing tags implicitly; max 3 tags per post; duplicates removed by
+// slug. Paid posts intentionally follow the same rules as free posts.
+func attachHumanTags(tx *gorm.DB, post *models.Post, raw []string) error {
+	names := normalizeTagNames(raw)
+	if len(names) > 3 {
+		names = names[:3]
+	}
+	now := time.Now()
+	for _, name := range names {
+		slug := shared.MakeSlug(name)
+		var tag models.Tag
+		if err := tx.First(&tag, "slug = ?", slug).Error; err != nil {
+			tag = models.Tag{ID: newID(), Slug: slug, Name: name, CreatedAt: now, UpdatedAt: now, LastUsedAt: now}
+			if err := tx.Create(&tag).Error; err != nil {
+				return err
+			}
+		} else {
+			if err := tx.Model(&tag).Updates(map[string]interface{}{
+				"name":         name,
+				"last_used_at": now,
+				"updated_at":   now,
+			}).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Create(&models.PostTag{PostID: post.ID, TagID: tag.ID, CreatedAt: now}).Error; err != nil {
+			return err
+		}
+		if err := recalcTagCounters(tx, tag.ID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func recalcTagCounters(tx *gorm.DB, tagIDs ...string) error {
+	for _, tagID := range tagIDs {
+		if tagID == "" {
+			continue
+		}
+
+		var postCount int64
+		if err := tx.Model(&models.PostTag{}).Where("tag_id = ?", tagID).Count(&postCount).Error; err != nil {
+			return err
+		}
+
+		var latest struct {
+			CreatedAt *time.Time `gorm:"column:created_at"`
+		}
+		if err := tx.Model(&models.Post{}).
+			Select("MAX(posts.created_at) AS created_at").
+			Joins("JOIN post_tags ON post_tags.post_id = posts.id").
+			Where("post_tags.tag_id = ?", tagID).
+			Scan(&latest).Error; err != nil {
+			return err
+		}
+
+		updates := map[string]interface{}{
+			"post_count": int(postCount),
+			"updated_at": time.Now(),
+		}
+		if latest.CreatedAt != nil {
+			updates["last_used_at"] = *latest.CreatedAt
+		}
+		if err := tx.Model(&models.Tag{}).Where("id = ?", tagID).Updates(updates).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func normalizeTagNames(raw []string) []string {
+	out := make([]string, 0, len(raw))
+	seen := map[string]struct{}{}
+	for _, name := range raw {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		slug := shared.MakeSlug(name)
+		if _, ok := seen[slug]; ok {
+			continue
+		}
+		seen[slug] = struct{}{}
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ─── Unlock (simulated CC payment) ───────────────────────────────────────────

@@ -1,6 +1,19 @@
 // TypeScript types mirroring the Go backend models.
 // Keep in sync with api/internal/core/models/*.go
 
+export interface Tag {
+  id: string
+  slug: string
+  name: string
+  description?: string
+  is_curated: boolean
+  weight: number
+  post_count: number
+  last_used_at: string
+  created_at: string
+  updated_at?: string
+}
+
 export interface User {
   id: string
   username: string
@@ -22,6 +35,7 @@ export interface Post {
   type: PostType
   author_id: string
   submolt_id: string
+  submolt?: SubMolt
   title: string
   content: string
   image_url: string
@@ -31,6 +45,7 @@ export interface Post {
   created_at: string
   updated_at: string
   author?: User
+  tags?: Tag[]
 }
 
 export interface PostListItem extends Post {
@@ -121,3 +136,4 @@ export interface ApiResponse<T> {
 export interface ApiListResponse<T> extends ApiResponse<T[]> {
   meta: { total: number; cursor: string }
 }
+

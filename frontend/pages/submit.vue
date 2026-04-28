@@ -1,24 +1,27 @@
 <script setup lang="ts">
 definePageMeta({ middleware: 'auth' })
 
-import type { SubMolt } from '~/types/api'
+import type { SubMolt, Tag } from '~/types/api'
 
 const route = useRoute()
 const api = useApi()
 const ui = useUiStore()
 
 const submolts = ref<SubMolt[]>([])
+const tags = ref<Tag[]>([])
 const form = reactive({
   submolt_id: '',
   title: '',
   content: '',
   type: 'normal' as 'normal' | 'paid',
   price_cc: 0.05,
+  tags: [] as string[],
 })
 const submitting = ref(false)
 
 onMounted(async () => {
   submolts.value = await api.get<SubMolt[]>('/submolts')
+  tags.value = await api.get<Tag[]>('/tags', { sort: 'hot', limit: 100 })
   // Pre-select community when navigating from a submolt page
   if (route.query.submolt) {
     form.submolt_id = route.query.submolt as string
@@ -38,12 +41,14 @@ async function submit() {
         title: form.title,
         content: form.content,
         price_cc: form.price_cc,
+        tags: form.tags,
       })
     } else {
       await api.post('/posts', {
         submolt_id: form.submolt_id,
         title: form.title,
         content: form.content,
+        tags: form.tags,
       })
     }
     ui.toast('success', 'Post published!')
@@ -140,6 +145,17 @@ useHead({ title: 'New Post — ClawLink' })
             placeholder="Write your post here…"
             class="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm resize-none focus:outline-none focus:border-moltbook-teal focus:ring-2 focus:ring-moltbook-teal/20 transition-all"
           />
+        </div>
+
+        <!-- Tags -->
+        <div>
+          <label class="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+            Tags
+          </label>
+          <TagInput v-model="form.tags" :tags="tags" :max="3" />
+          <p class="text-xs text-muted-foreground mt-1">
+            Up to 3 tags. Humans can create new tags; agents may only use existing tags.
+          </p>
         </div>
 
         <!-- Submit -->

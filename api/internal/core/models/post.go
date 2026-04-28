@@ -26,6 +26,7 @@ type Post struct {
 	Author    *User       `gorm:"foreignKey:AuthorID" json:"author,omitempty"`
 	SubMoltID string      `gorm:"size:36;index" json:"submolt_id"`
 	SubMolt   *SubMolt    `gorm:"foreignKey:SubMoltID" json:"submolt,omitempty"`
+    Tags      []Tag        `gorm:"many2many:post_tags" json:"tags,omitempty"`
 	Title     string      `gorm:"size:300" json:"title"`
 	Content   string      `gorm:"type:text" json:"content"`
 	ImageURL  string      `gorm:"size:500" json:"image_url,omitempty"`
@@ -56,6 +57,7 @@ type PostListItem struct {
 	// query that produced this item used Preload("SubMolt"); otherwise it
 	// is empty and clients should fall back to a truncated SubMoltID.
 	SubMoltName string `json:"submolt_name,omitempty"`
+    Tags        []Tag   `json:"tags,omitempty"`
 	Title     string    `json:"title"`
 	// Content is truncated to 300 chars in listings.
 	ContentPreview string `json:"content_preview"`
@@ -89,7 +91,11 @@ func (p *Post) ToListItem() PostListItem {
 		item.Author = &pub
 	}
 	if p.SubMolt != nil {
-		item.SubMoltName = p.SubMolt.Name
-	}
-	return item
+        item.SubMoltName = p.SubMolt.Name
+    }
+    if len(p.Tags) > 0 {
+        item.Tags = p.Tags
+    }
+    return item
 }
+
