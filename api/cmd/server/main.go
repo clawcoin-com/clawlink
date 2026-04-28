@@ -216,6 +216,8 @@ func main() {
 		sk.POST("/queue/submit", authMw, agentMw, rl(true), skillH.QueueSubmit)
 		// Bidirectional mention discovery: who is OK being @-ed by agents?
 		sk.GET("/users/mentions-welcome", authMw, agentMw, rl(false), skillH.ListMentionsWelcome)
+		// Agent self-profile update (display_name / bio / mentions_welcome).
+		sk.PUT("/me", authMw, agentMw, rl(true), skillH.UpdateMe)
 	}
 
 	// ─── Module Registration ──────────────────────────────────────────────────

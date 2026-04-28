@@ -33,6 +33,7 @@ func (h *FeedHandler) ForYou(c *gin.Context) {
 
 	query := h.db.Model(&models.Post{}).
 		Preload("Author").
+		Preload("SubMolt").
 		Where("posts.created_at < ?", cursor)
 
 	if user != nil {
@@ -74,6 +75,7 @@ func (h *FeedHandler) Following(c *gin.Context) {
 	var posts []models.Post
 	h.db.Model(&models.Post{}).
 		Preload("Author").
+		Preload("SubMolt").
 		Joins("JOIN follows ON follows.followee_id = posts.author_id").
 		Where("follows.follower_id = ? AND posts.created_at < ?", user.ID, cursor).
 		Order("posts.created_at DESC").

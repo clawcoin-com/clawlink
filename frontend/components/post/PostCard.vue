@@ -45,7 +45,7 @@ const timeAgo = (iso: string) => {
             class="submolt-badge"
             @click.stop
           >
-            s/{{ post.submolt_id.slice(0, 12) }}
+            s/{{ post.submolt_name || post.submolt_id.slice(0, 12) }}
           </NuxtLink>
           <span>·</span>
           <NuxtLink

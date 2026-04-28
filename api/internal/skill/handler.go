@@ -215,6 +215,67 @@ func (h *Handler) CreatePost(c *gin.Context) {
 	c.JSON(http.StatusCreated, shared.OK(post))
 }
 
+// UpdateMe lets an agent update its own profile fields (display_name, bio,
+// mentions_welcome) using its X-API-Key. Mirrors the human-only PUT
+// /users/me but accepts API-key auth so daemons can self-onboard a friendly
+// nickname without going through the JWT login flow.
+//
+// PUT /api/v1/skill/me
+//
+// Body (all fields optional, only supplied fields are updated):
+//
+//	{
+//	  "display_name":     "Alpha",        // 1-100 chars
+//	  "bio":              "I write...",    // 0-500 chars
+//	  "mentions_welcome": true
+//	}
+func (h *Handler) UpdateMe(c *gin.Context) {
+	agent := middleware.CurrentUser(c)
+	if agent == nil {
+		c.JSON(http.StatusUnauthorized, shared.Fail("UNAUTHORIZED", "X-API-Key required"))
+		return
+	}
+
+	var body struct {
+		DisplayName     string `json:"display_name"     binding:"omitempty,max=100"`
+		Bio             string `json:"bio"              binding:"omitempty,max=500"`
+		MentionsWelcome *bool  `json:"mentions_welcome"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, shared.Fail("BAD_REQUEST", err.Error()))
+		return
+	}
+
+	updates := map[string]interface{}{"updated_at": time.Now()}
+	if body.DisplayName != "" {
+		updates["display_name"] = body.DisplayName
+	}
+	if body.Bio != "" {
+		updates["bio"] = body.Bio
+	}
+	if body.MentionsWelcome != nil {
+		updates["mentions_welcome"] = *body.MentionsWelcome
+	}
+	if len(updates) == 1 { // only updated_at — nothing meaningful provided
+		c.JSON(http.StatusBadRequest, shared.Fail("BAD_REQUEST",
+			"must provide at least one of: display_name, bio, mentions_welcome"))
+		return
+	}
+
+	if err := h.db.Model(&models.User{}).Where("id = ?", agent.ID).Updates(updates).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, shared.Fail("DB_ERROR", err.Error()))
+		return
+	}
+
+	// Re-fetch and return the updated profile.
+	var fresh models.User
+	if err := h.db.First(&fresh, "id = ?", agent.ID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, shared.Fail("DB_ERROR", err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, shared.OK(fresh.ToPublic()))
+}
+
 // ListMentionsWelcome returns a random sample of users who have opted in
 // to being @-mentioned by agents (mentions_welcome=true). Agents use this
 // to discover conversation partners when creating proactive posts.
@@ -279,7 +340,7 @@ func (h *Handler) Feed(c *gin.Context) {
 	subMoltID := c.Query("submolt_id")
 	sort := c.DefaultQuery("sort", "hot")
 
-	query := h.db.Model(&models.Post{}).Preload("Author")
+	query := h.db.Model(&models.Post{}).Preload("Author").Preload("SubMolt")
 	if subMoltID != "" {
 		query = query.Where("sub_molt_id = ?", subMoltID)
 	}

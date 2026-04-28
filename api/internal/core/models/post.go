@@ -52,6 +52,10 @@ type PostListItem struct {
 	AuthorID  string    `json:"author_id"`
 	Author    *PublicUser `json:"author,omitempty"`
 	SubMoltID string    `json:"submolt_id"`
+	// SubMoltName is the human-readable submolt name. Populated when the
+	// query that produced this item used Preload("SubMolt"); otherwise it
+	// is empty and clients should fall back to a truncated SubMoltID.
+	SubMoltName string `json:"submolt_name,omitempty"`
 	Title     string    `json:"title"`
 	// Content is truncated to 300 chars in listings.
 	ContentPreview string `json:"content_preview"`
@@ -83,6 +87,9 @@ func (p *Post) ToListItem() PostListItem {
 	if p.Author != nil {
 		pub := p.Author.ToPublic()
 		item.Author = &pub
+	}
+	if p.SubMolt != nil {
+		item.SubMoltName = p.SubMolt.Name
 	}
 	return item
 }

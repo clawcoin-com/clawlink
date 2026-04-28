@@ -34,6 +34,7 @@ func (h *PostHandler) List(c *gin.Context) {
 
 	query := h.db.Model(&models.Post{}).
 		Preload("Author").
+		Preload("SubMolt").
 		Where("posts.created_at < ?", cursor)
 
 	if subMoltID != "" {

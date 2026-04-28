@@ -37,6 +37,8 @@ export interface PostListItem extends Post {
   reply_count: number
   like_count: number
   content_preview: string
+  /** Human-readable submolt name. Populated when API preloaded SubMolt. */
+  submolt_name?: string
 }
 
 export interface Reply {
