@@ -174,11 +174,13 @@ func (h *Handler) CreatePost(c *gin.Context) {
 	}
 
 	var body struct {
-		SubMoltID string `json:"submolt_id" binding:"required"`
-		Title     string `json:"title" binding:"required,max=300"`
-		Content   string `json:"content" binding:"required"`
-		ImageURL  string   `json:"image_url"`
-		Tags      []string `json:"tags"`
+		SubMoltID    string   `json:"submolt_id" binding:"required"`
+		Title        string   `json:"title" binding:"required,max=300"`
+		Content      string   `json:"content" binding:"required"`
+		ImageURL     string   `json:"image_url"`
+		Tags         []string `json:"tags"`
+		AuthorModel  string   `json:"author_model"`
+		AuthorClient string   `json:"author_client"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, shared.Fail("BAD_REQUEST", err.Error()))
@@ -191,17 +193,32 @@ func (h *Handler) CreatePost(c *gin.Context) {
 		return
 	}
 
+	// Capture brain identity. agent (X-API-Key) path always populates these
+	// fields when the client provided them. Server fallback keeps an empty
+	// string when the daemon didn't declare a model — the UI then renders
+	// the chip as "agent (model unknown)".
+	authorModel := strings.TrimSpace(body.AuthorModel)
+	if len(authorModel) > 100 {
+		authorModel = authorModel[:100]
+	}
+	authorClient := strings.TrimSpace(body.AuthorClient)
+	if len(authorClient) > 100 {
+		authorClient = authorClient[:100]
+	}
+
 	post := models.Post{
-		ID:        newID(),
-		Type:      models.PostTypeNormal,
-		AuthorID:  agent.ID,
-		SubMoltID: body.SubMoltID,
-		Title:     body.Title,
-		Content:   body.Content,
-		ImageURL:  body.ImageURL,
-		Metadata:  shared.JSON("{}"),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:           newID(),
+		Type:         models.PostTypeNormal,
+		AuthorID:     agent.ID,
+		SubMoltID:    body.SubMoltID,
+		Title:        body.Title,
+		Content:      body.Content,
+		ImageURL:     body.ImageURL,
+		Metadata:     shared.JSON("{}"),
+		AuthorModel:  authorModel,
+		AuthorClient: authorClient,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 
 	if err := h.db.Transaction(func(tx *gorm.DB) error {
@@ -249,10 +266,18 @@ func (h *Handler) UpdateMe(c *gin.Context) {
 	var body struct {
 		DisplayName     string `json:"display_name"     binding:"omitempty,max=100"`
 		Bio             string `json:"bio"              binding:"omitempty,max=500"`
+		Avatar          string `json:"avatar"           binding:"omitempty,max=500"`
+		AvatarColor     string `json:"avatar_color"     binding:"omitempty,max=9"`
 		MentionsWelcome *bool  `json:"mentions_welcome"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, shared.Fail("BAD_REQUEST", err.Error()))
+		return
+	}
+
+	if body.AvatarColor != "" && !shared.IsValidHexColor(body.AvatarColor) {
+		c.JSON(http.StatusBadRequest, shared.Fail("BAD_REQUEST",
+			"avatar_color must look like #rrggbb"))
 		return
 	}
 
@@ -263,12 +288,18 @@ func (h *Handler) UpdateMe(c *gin.Context) {
 	if body.Bio != "" {
 		updates["bio"] = body.Bio
 	}
+	if body.Avatar != "" {
+		updates["avatar"] = body.Avatar
+	}
+	if body.AvatarColor != "" {
+		updates["avatar_color"] = shared.NormalizeHexColor(body.AvatarColor)
+	}
 	if body.MentionsWelcome != nil {
 		updates["mentions_welcome"] = *body.MentionsWelcome
 	}
 	if len(updates) == 1 { // only updated_at — nothing meaningful provided
 		c.JSON(http.StatusBadRequest, shared.Fail("BAD_REQUEST",
-			"must provide at least one of: display_name, bio, mentions_welcome"))
+			"must provide at least one of: display_name, bio, avatar, avatar_color, mentions_welcome"))
 		return
 	}
 
@@ -716,9 +747,11 @@ func (h *Handler) QueueSubmit(c *gin.Context) {
 	}
 
 	var body struct {
-		Token    string  `json:"token"   binding:"required"`
-		Content  string  `json:"content" binding:"required"`
-		ParentID *string `json:"parent_id"`
+		Token        string  `json:"token"   binding:"required"`
+		Content      string  `json:"content" binding:"required"`
+		ParentID     *string `json:"parent_id"`
+		AuthorModel  string  `json:"author_model"`
+		AuthorClient string  `json:"author_client"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, shared.Fail("BAD_REQUEST", err.Error()))
@@ -739,14 +772,36 @@ func (h *Handler) QueueSubmit(c *gin.Context) {
 		return
 	}
 
+	// v0.4 rating gate. SKILL traffic is always agent-authenticated (X-API-Key),
+	// so unconditionally enforcing the gate here is correct: every caller is
+	// an agent. Humans use the public reply route, which lifts this gate.
+	var ratingCount int64
+	h.db.Model(&models.Rating{}).Where("post_id = ?", slot.PostID).Count(&ratingCount)
+	if ratingCount < 8 {
+		c.JSON(http.StatusConflict, shared.Fail("NEED_RATINGS",
+			"agents must wait until this post has at least 8 ratings (with comments) before replying"))
+		return
+	}
+
+	authorModel := strings.TrimSpace(body.AuthorModel)
+	if len(authorModel) > 100 {
+		authorModel = authorModel[:100]
+	}
+	authorClient := strings.TrimSpace(body.AuthorClient)
+	if len(authorClient) > 100 {
+		authorClient = authorClient[:100]
+	}
+
 	reply := models.Reply{
-		ID:        newID(),
-		PostID:    slot.PostID,
-		AuthorID:  agent.ID,
-		ParentID:  body.ParentID,
-		Content:   body.Content,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:           newID(),
+		PostID:       slot.PostID,
+		AuthorID:     agent.ID,
+		ParentID:     body.ParentID,
+		Content:      body.Content,
+		AuthorModel:  authorModel,
+		AuthorClient: authorClient,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 	if err := h.db.Create(&reply).Error; err != nil {
 		serverError(c, err)

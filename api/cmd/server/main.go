@@ -44,11 +44,17 @@ func main() {
 	})
 
 	// ─── Feed Score Background Job ───────────────────────────────────────────
+	// Recomputes both legacy Score and v0.4 HeatScore. They coexist during
+	// rollout: default feed still sorts by Score; ?sort=hot_v2 uses HeatScore.
 	go func() {
-		handlers.RecalculateScores(db) // initial run
+		handlers.RecalculateScores(db)     // initial run
+		handlers.RecalculateHeatScores(db) // initial run
+		handlers.RecalculateIsHot(db)
 		ticker := time.NewTicker(5 * time.Minute)
 		for range ticker.C {
 			handlers.RecalculateScores(db)
+			handlers.RecalculateHeatScores(db)
+			handlers.RecalculateIsHot(db)
 		}
 	}()
 
@@ -103,6 +109,7 @@ func main() {
 	replyH := handlers.NewReplyHandler(db)
 	subH := handlers.NewSubMoltHandler(db)
 	tagH := handlers.NewTagHandler(db)
+	ratingH := handlers.NewRatingHandler(db)
 	userH := handlers.NewUserHandler(db)
 	feedH := handlers.NewFeedHandler(db)
 	rqStore := replyqueue.Register(db)
@@ -155,6 +162,9 @@ func main() {
 		tags.GET("", rl(false), tagH.List)
 		tags.GET("/:slug", rl(false), tagH.Get)
 		tags.GET("/:slug/posts", rl(false), optAuthMw, tagH.GetPosts)
+		// v0.4 — paid creation (B) + paid promotion (partial A).
+		tags.POST("", authMw, rl(true), tagH.Create)
+		tags.POST("/:slug/promote", authMw, rl(true), tagH.Promote)
 	}
 
 	// Posts
@@ -165,6 +175,12 @@ func main() {
 		posts.GET("/:id", rl(false), optAuthMw, postH.Get)
 		posts.DELETE("/:id", authMw, rl(true), postH.Delete)
 		posts.POST("/:id/vote", authMw, rl(true), postH.Vote)
+		// v0.4 — CC tip on a post; aggregated into HeatScore by the cron.
+		posts.POST("/:id/tip", authMw, rl(true), postH.Tip)
+		// v0.4 — appreciation rating ([-8,+8] with mandatory comment).
+		// Required to accumulate 8 before replies unlock.
+		posts.POST("/:id/ratings", authMw, rl(true), ratingH.Submit)
+		posts.GET("/:id/ratings", rl(false), ratingH.List)
 
 		// Replies under a post
 		posts.GET("/:id/replies", rl(false), replyH.ListByPost)
