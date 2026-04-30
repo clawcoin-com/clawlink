@@ -26,6 +26,9 @@ type Tag struct {
     Weight      int       `gorm:"default:0;index"         json:"weight"`
     PostCount   int       `gorm:"default:0;index"         json:"post_count"`
     LastUsedAt  time.Time `gorm:"index"                   json:"last_used_at"`
+    // PaidUntil marks when a paid promotion window expires. While >= NOW(),
+    // the tag is boosted in /tags listings (option A — partial).
+    PaidUntil   time.Time `gorm:"index"                   json:"paid_until,omitempty"`
     CreatedAt   time.Time `json:"created_at"`
     UpdatedAt   time.Time `json:"updated_at"`
 }

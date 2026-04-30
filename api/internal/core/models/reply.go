@@ -16,6 +16,10 @@ type Reply struct {
 	Content   string    `gorm:"type:text" json:"content"`
 	ImageURL  string    `gorm:"size:500" json:"image_url,omitempty"`
 	Karma     int       `gorm:"default:0" json:"karma"`
+	// AuthorModel / AuthorClient identify the brain + tooling that produced
+	// this reply when the author is an agent. Empty for human-authored replies.
+	AuthorModel  string `gorm:"size:100;index" json:"author_model,omitempty"`
+	AuthorClient string `gorm:"size:100"       json:"author_client,omitempty"`
 	CreatedAt time.Time `gorm:"index" json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 

@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/clawcoin-com/clawlink/internal/shared"
+	"gorm.io/gorm"
 )
 
 // User represents a platform participant — human or AI agent.
@@ -14,6 +15,12 @@ type User struct {
 	DisplayName string `gorm:"size:100"            json:"display_name"`
 	Bio         string `gorm:"size:500"            json:"bio"`
 	Avatar      string `gorm:"size:500"            json:"avatar"`
+	// AvatarColor is the fallback background color used when Avatar (URL) is
+	// empty. Stored as "#rrggbb". Generated at registration time from a hash
+	// of user ID so each user gets a stable, distinct color. Both fields can
+	// coexist; the UI prefers Avatar when non-empty and falls back to
+	// AvatarColor + first letter of DisplayName/Username otherwise.
+	AvatarColor string `gorm:"size:9"              json:"avatar_color"`
 
 	// Email/password auth
 	Email            *string `gorm:"uniqueIndex;size:320" json:"email,omitempty"`
@@ -59,12 +66,26 @@ type PublicUser struct {
 	DisplayName     string    `json:"display_name"`
 	Bio             string    `json:"bio"`
 	Avatar          string    `json:"avatar"`
+	AvatarColor     string    `json:"avatar_color"`
 	Email           *string   `json:"email,omitempty"`
 	WalletAddress   *string   `json:"wallet_address,omitempty"`
 	IsAgent         bool      `json:"is_agent"`
 	MentionsWelcome bool      `json:"mentions_welcome"`
 	Karma           int       `json:"karma"`
 	CreatedAt       time.Time `json:"created_at"`
+}
+
+// BeforeCreate auto-fills the avatar fallback color from a hash of the user ID
+// so every freshly created account gets a stable palette color even if the
+// caller forgot to set one. Existing colors are preserved (allowing the
+// callsite to override with a user-chosen color).
+func (u *User) BeforeCreate(tx *gorm.DB) error {
+	if !shared.IsValidHexColor(u.AvatarColor) {
+		u.AvatarColor = shared.PickAvatarColor(u.ID)
+	} else {
+		u.AvatarColor = shared.NormalizeHexColor(u.AvatarColor)
+	}
+	return nil
 }
 
 func (u *User) ToPublic() PublicUser {
@@ -74,6 +95,7 @@ func (u *User) ToPublic() PublicUser {
 		DisplayName:     u.DisplayName,
 		Bio:             u.Bio,
 		Avatar:          u.Avatar,
+		AvatarColor:     u.AvatarColor,
 		Email:           u.Email,
 		WalletAddress:   u.WalletAddress,
 		IsAgent:         u.IsAgent,
