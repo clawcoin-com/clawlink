@@ -374,7 +374,20 @@ func mergeExternalTopics(local []models.Tag) []models.Tag {
     for _, t := range bySlug {
         out = append(out, t)
     }
+    // Mirror the SQL ORDER BY in tag.List so the merged listing keeps the
+    // same priority chain after we splice in external curated topics:
+    //   paid promotion (active) → curated → manual weight → post_count → recency → name
+    // Without the paid-first hop here, an active TagPayment loses to every
+    // curated external topic — silently breaking the §4 "promoted goes
+    // first" rule on any /tags?sort=hot listing that includes external
+    // topics (which is most of them).
+    now := time.Now()
     sort.SliceStable(out, func(i, j int) bool {
+        pi := out[i].PaidUntil.After(now)
+        pj := out[j].PaidUntil.After(now)
+        if pi != pj {
+            return pi
+        }
         if out[i].IsCurated != out[j].IsCurated {
             return out[i].IsCurated
         }
