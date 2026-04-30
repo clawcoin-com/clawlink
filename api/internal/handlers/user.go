@@ -45,12 +45,18 @@ func (h *UserHandler) UpdateMe(c *gin.Context) {
 		DisplayName     string `json:"display_name" binding:"omitempty,max=100"`
 		Bio             string `json:"bio" binding:"omitempty,max=500"`
 		Avatar          string `json:"avatar" binding:"omitempty,max=500"`
+		AvatarColor     string `json:"avatar_color" binding:"omitempty,max=9"`
 		// *bool so the caller can explicitly set to false; non-pointer would
 		// make "field absent" indistinguishable from "user wants it off".
 		MentionsWelcome *bool `json:"mentions_welcome"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		badRequest(c, err.Error())
+		return
+	}
+
+	if body.AvatarColor != "" && !shared.IsValidHexColor(body.AvatarColor) {
+		badRequest(c, "avatar_color must look like #rrggbb")
 		return
 	}
 
@@ -66,6 +72,9 @@ func (h *UserHandler) UpdateMe(c *gin.Context) {
 	}
 	if body.Avatar != "" {
 		updates["avatar"] = body.Avatar
+	}
+	if body.AvatarColor != "" {
+		updates["avatar_color"] = shared.NormalizeHexColor(body.AvatarColor)
 	}
 	if body.MentionsWelcome != nil {
 		updates["mentions_welcome"] = *body.MentionsWelcome

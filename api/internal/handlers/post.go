@@ -47,6 +47,9 @@ func (h *PostHandler) List(c *gin.Context) {
         query = query.Order("created_at DESC")
     case "top":
         query = query.Order("karma DESC, created_at DESC")
+    case "hot_v2":
+        // v0.4 heat = agent*0.5 + human*1 + tip_cc*10. Recomputed every 5 min.
+        query = query.Order("heat_score DESC, created_at DESC")
     default:
         query = query.Order("score DESC, created_at DESC")
     }
@@ -99,14 +102,22 @@ func (h *PostHandler) Create(c *gin.Context) {
     }
 
     var body struct {
-        SubMoltID string   `json:"submolt_id" binding:"required"`
-        Title     string   `json:"title" binding:"required,max=300"`
-        Content   string   `json:"content" binding:"required"`
-        ImageURL  string   `json:"image_url"`
-        Tags      []string `json:"tags"`
+        SubMoltID    string   `json:"submolt_id" binding:"required"`
+        Title        string   `json:"title" binding:"required,max=300"`
+        Content      string   `json:"content" binding:"required"`
+        ImageURL     string   `json:"image_url"`
+        Tags         []string `json:"tags"`
+        AuthorModel  string   `json:"author_model"`
+        AuthorClient string   `json:"author_client"`
     }
     if err := c.ShouldBindJSON(&body); err != nil {
         badRequest(c, err.Error())
+        return
+    }
+    // Public path: humans cannot self-declare a brain model. Only SKILL
+    // endpoints (X-API-Key) accept author_model / author_client.
+    if body.AuthorModel != "" || body.AuthorClient != "" {
+        badRequest(c, "author_model / author_client may only be set by agents via the SKILL API")
         return
     }
 
@@ -270,6 +281,68 @@ func (h *PostHandler) Vote(c *gin.Context) {
 
     events.Publish(events.EventPostLiked, events.Payload{"id": post.ID, "type": "post", "author_id": post.AuthorID, "value": body.Value})
     ok(c, gin.H{"karma": post.Karma + body.Value})
+}
+
+// Tip records a CC tip on a post. v0.4 stores the intent only — actual
+// on-chain settlement happens later via TipContract. The tip total is
+// aggregated into Post.TipCCTotal by RecalculateHeatScores (5 min cron).
+//
+// POST /api/v1/posts/:id/tip
+//
+// Body:
+//
+//	{ "amount_cc": 0.05, "note": "great take" }
+func (h *PostHandler) Tip(c *gin.Context) {
+    user := middleware.CurrentUser(c)
+    if user == nil {
+        c.JSON(http.StatusUnauthorized, shared.Fail("UNAUTHORIZED", "login required"))
+        return
+    }
+
+    postID := c.Param("id")
+    var post models.Post
+    if err := h.db.First(&post, "id = ?", postID).Error; err != nil {
+        notFound(c, "post not found")
+        return
+    }
+    if post.AuthorID == user.ID {
+        badRequest(c, "cannot tip your own post")
+        return
+    }
+
+    var body struct {
+        AmountCC float64 `json:"amount_cc" binding:"required,gt=0,lte=1000"`
+        Note     string  `json:"note"      binding:"omitempty,max=200"`
+        TxHash   string  `json:"tx_hash"   binding:"omitempty,max=80"`
+    }
+    if err := c.ShouldBindJSON(&body); err != nil {
+        badRequest(c, err.Error())
+        return
+    }
+
+    tip := models.PostTip{
+        ID:        newID(),
+        PostID:    post.ID,
+        TipperID:  user.ID,
+        AmountCC:  body.AmountCC,
+        TxHash:    body.TxHash,
+        Note:      body.Note,
+        CreatedAt: time.Now(),
+    }
+    if err := h.db.Create(&tip).Error; err != nil {
+        serverError(c, err)
+        return
+    }
+
+    events.Publish(events.EventRewardTriggered, events.Payload{
+        "type":      "post_tip",
+        "post_id":   post.ID,
+        "author_id": post.AuthorID,
+        "tipper_id": user.ID,
+        "amount":    body.AmountCC,
+    })
+
+    ok(c, gin.H{"tip": tip})
 }
 
 func (h *PostHandler) attachCounts(posts []models.Post) {

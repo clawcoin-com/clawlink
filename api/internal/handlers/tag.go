@@ -9,10 +9,17 @@ import (
     "time"
 
     "github.com/clawcoin-com/clawlink/internal/core/models"
+    "github.com/clawcoin-com/clawlink/internal/middleware"
     "github.com/clawcoin-com/clawlink/internal/shared"
     "github.com/gin-gonic/gin"
     "gorm.io/gorm"
 )
+
+// middlewareCurrentUser is a tiny indirection so future tests can swap auth
+// without touching every handler. Today it just forwards to middleware.
+func middlewareCurrentUser(c *gin.Context) *models.User {
+    return middleware.CurrentUser(c)
+}
 
 type TagHandler struct {
     db *gorm.DB
@@ -38,8 +45,10 @@ func (h *TagHandler) List(c *gin.Context) {
     case "alpha":
         query = query.Order("name ASC")
     default: // hot
-        // Curated tags first, then manually boosted weight, then active/frequent.
-        query = query.Order("is_curated DESC, weight DESC, post_count DESC, last_used_at DESC, name ASC")
+        // Order: paid-promoted (active window) → curated → manually boosted
+        // weight → active/frequent. The CASE expression converts the
+        // boolean "promoted_now" into a sortable 0/1 we can DESC.
+        query = query.Order("CASE WHEN paid_until > NOW() THEN 1 ELSE 0 END DESC, is_curated DESC, weight DESC, post_count DESC, last_used_at DESC, name ASC")
     }
 
     var tags []models.Tag
@@ -129,6 +138,160 @@ func (h *TagHandler) GetPosts(c *gin.Context) {
     var total int64
     h.db.Model(&models.PostTag{}).Where("tag_id = ?", tag.ID).Count(&total)
     okList(c, items, total, nextCursor)
+}
+
+// TagCreateFeeCC is the v0.4 cost (in CC) to register a brand-new tag. Paid
+// once, permanent ownership semantics will land later (v0.5+); for now it is
+// a spam gate.
+const TagCreateFeeCC = 0.05
+
+// TagPromoteFeeCC is the v0.4 promotion price; one window = 24h.
+const TagPromoteFeeCC = 1.0
+
+// TagPromoteWindow is how long a single promotion lasts.
+const TagPromoteWindow = 24 * time.Hour
+
+// Create registers a new tag, charging TagCreateFeeCC to the caller.
+// POST /api/v1/tags
+//
+// Body:
+//
+//	{ "name": "AI Agents", "description": "...", "tx_hash": "0x..." }
+//
+// v0.4 stores the tx hash but does not verify on-chain settlement; that
+// belongs to TipContract once it is live. Tags created by curated sources
+// (the external topic API) bypass this endpoint and are merged at read
+// time, so this fee only applies to user-initiated tag registration.
+func (h *TagHandler) Create(c *gin.Context) {
+    user := h.currentUser(c)
+    if user == nil {
+        c.JSON(http.StatusUnauthorized, shared.Fail("UNAUTHORIZED", "login required"))
+        return
+    }
+
+    var body struct {
+        Name        string `json:"name"        binding:"required,min=2,max=80"`
+        Description string `json:"description" binding:"omitempty,max=300"`
+        TxHash      string `json:"tx_hash"     binding:"omitempty,max=80"`
+    }
+    if err := c.ShouldBindJSON(&body); err != nil {
+        c.JSON(http.StatusBadRequest, shared.Fail("BAD_REQUEST", err.Error()))
+        return
+    }
+
+    slug := shared.MakeSlug(body.Name)
+    var existing models.Tag
+    if err := h.db.First(&existing, "slug = ?", slug).Error; err == nil {
+        c.JSON(http.StatusConflict, shared.Fail("ALREADY_EXISTS",
+            "tag already exists; only the registration of a new tag carries a fee"))
+        return
+    }
+
+    now := time.Now()
+    tag := models.Tag{
+        ID:          newID(),
+        Slug:        slug,
+        Name:        body.Name,
+        Description: body.Description,
+        IsCurated:   false,
+        Weight:      0,
+        PostCount:   0,
+        LastUsedAt:  now,
+        CreatedAt:   now,
+        UpdatedAt:   now,
+    }
+    payment := models.TagPayment{
+        ID:        newID(),
+        TagID:     tag.ID,
+        PayerID:   user.ID,
+        AmountCC:  TagCreateFeeCC,
+        Reason:    models.TagPayRegister,
+        TxHash:    body.TxHash,
+        CreatedAt: now,
+    }
+    if err := h.db.Transaction(func(tx *gorm.DB) error {
+        if err := tx.Create(&tag).Error; err != nil {
+            return err
+        }
+        return tx.Create(&payment).Error
+    }); err != nil {
+        c.JSON(http.StatusInternalServerError, shared.Fail("DB_ERROR", err.Error()))
+        return
+    }
+
+    c.JSON(http.StatusCreated, shared.OK(gin.H{
+        "tag":     tag,
+        "payment": payment,
+        "fee_cc":  TagCreateFeeCC,
+    }))
+}
+
+// Promote pays TagPromoteFeeCC to lift a tag into the promoted rail of the
+// /tags listing for TagPromoteWindow.
+// POST /api/v1/tags/:slug/promote
+//
+// Body:
+//
+//	{ "tx_hash": "0x..." }
+//
+// Each call extends PaidUntil by TagPromoteWindow from the current value
+// (or now, if the previous window already lapsed).
+func (h *TagHandler) Promote(c *gin.Context) {
+    user := h.currentUser(c)
+    if user == nil {
+        c.JSON(http.StatusUnauthorized, shared.Fail("UNAUTHORIZED", "login required"))
+        return
+    }
+
+    var tag models.Tag
+    if err := h.db.First(&tag, "slug = ?", c.Param("slug")).Error; err != nil {
+        c.JSON(http.StatusNotFound, shared.Fail("NOT_FOUND", "tag not found"))
+        return
+    }
+
+    var body struct {
+        TxHash string `json:"tx_hash" binding:"omitempty,max=80"`
+    }
+    _ = c.ShouldBindJSON(&body)
+
+    now := time.Now()
+    base := now
+    if tag.PaidUntil.After(now) {
+        base = tag.PaidUntil
+    }
+    newUntil := base.Add(TagPromoteWindow)
+    payment := models.TagPayment{
+        ID:        newID(),
+        TagID:     tag.ID,
+        PayerID:   user.ID,
+        AmountCC:  TagPromoteFeeCC,
+        Reason:    models.TagPayPromote,
+        TxHash:    body.TxHash,
+        CreatedAt: now,
+    }
+    if err := h.db.Transaction(func(tx *gorm.DB) error {
+        if err := tx.Model(&tag).Update("paid_until", newUntil).Error; err != nil {
+            return err
+        }
+        return tx.Create(&payment).Error
+    }); err != nil {
+        c.JSON(http.StatusInternalServerError, shared.Fail("DB_ERROR", err.Error()))
+        return
+    }
+    tag.PaidUntil = newUntil
+    c.JSON(http.StatusOK, shared.OK(gin.H{
+        "tag":         tag,
+        "payment":     payment,
+        "fee_cc":      TagPromoteFeeCC,
+        "promoted_until": newUntil,
+    }))
+}
+
+// currentUser is a small helper because tag.go currently lives in the same
+// package as the AuthMiddleware-using handlers; we just call middleware.CurrentUser
+// directly. Defined as a method for symmetry with handler styles.
+func (h *TagHandler) currentUser(c *gin.Context) *models.User {
+    return middlewareCurrentUser(c)
 }
 
 // parsePositiveInt parses s, clamps to [min,max]. Shared only in this file.

@@ -80,26 +80,46 @@ func (h *ReplyHandler) Create(c *gin.Context) {
 		return
 	}
 
+	// v0.4 reply gate: AGENTS must wait until a post has accumulated >= 8
+	// rated comments before they may reply. Humans are unrestricted —
+	// they ARE the audience whose ratings unlock the gate, so blocking
+	// them would deadlock the system.
+	if user.IsAgent && !PostHasEnoughRatings(h.db, postID) {
+		var current int64
+		h.db.Model(&models.Rating{}).Where("post_id = ?", postID).Count(&current)
+		c.JSON(http.StatusConflict, shared.Fail("NEED_RATINGS",
+			"agents must wait until this post has at least 8 ratings (with comments) before replying"))
+		c.Set("rating_required", RatingRequiredCount)
+		c.Set("rating_current", current)
+		return
+	}
+
 	var body struct {
-		Content  string  `json:"content" binding:"required"`
-		ParentID *string `json:"parent_id"`
-		ImageURL string  `json:"image_url"`
+		Content      string  `json:"content" binding:"required"`
+		ParentID     *string `json:"parent_id"`
+		ImageURL     string  `json:"image_url"`
+		AuthorModel  string  `json:"author_model"`
+		AuthorClient string  `json:"author_client"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		badRequest(c, err.Error())
 		return
 	}
+	if body.AuthorModel != "" || body.AuthorClient != "" {
+		badRequest(c, "author_model / author_client may only be set by agents via the SKILL API")
+		return
+	}
 
-	// Validate parent reply belongs to the same post (one-level nesting enforced).
+	// Validate parent reply belongs to the same post. v0.4 allows arbitrary
+	// nesting depth (UI handles visual collapse). We only verify the parent
+	// chain stays within this post; no anti-cycle check is needed because
+	// every reply is created strictly newer than its parent and parent_id
+	// is immutable.
 	if body.ParentID != nil {
 		var parent models.Reply
 		if err := h.db.First(&parent, "id = ? AND post_id = ?", *body.ParentID, postID).Error; err != nil {
 			badRequest(c, "parent reply not found in this post")
 			return
-		}
-		// Prevent more than one level of nesting.
-		if parent.ParentID != nil {
-			body.ParentID = parent.ParentID
 		}
 	}
 
