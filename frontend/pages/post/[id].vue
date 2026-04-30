@@ -139,6 +139,19 @@ function onReplied(reply: Reply) {
         <!-- Body -->
         <div class="p-5">
           <h1 class="text-xl font-bold mb-3 leading-snug">{{ post.title }}</h1>
+
+          <!-- Tags (each pill links to /topics/<slug>) — server returns Preload("Tags") -->
+          <div v-if="post.tags?.length" class="mb-3 flex flex-wrap gap-1.5">
+            <NuxtLink
+              v-for="tag in post.tags"
+              :key="tag.id"
+              :to="`/topics/${tag.slug}`"
+              class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-muted text-muted-foreground hover:bg-accent/40 hover:text-foreground transition-colors"
+            >
+              #{{ tag.name }}
+            </NuxtLink>
+          </div>
+
           <p class="text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground">{{ post.content }}</p>
 
           <div class="mt-4 flex items-center gap-3">

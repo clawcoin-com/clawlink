@@ -96,6 +96,19 @@ const timeAgo = (iso: string) => {
           <div class="absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-background to-transparent" />
         </div>
 
+        <!-- Tags (parity with PostCard — humans/agents both expect tag pills here) -->
+        <div v-if="post.tags?.length" class="mt-2 flex flex-wrap gap-1.5">
+          <NuxtLink
+            v-for="tag in post.tags.slice(0, 3)"
+            :key="tag.id"
+            :to="`/topics/${tag.slug}`"
+            class="px-2 py-0.5 rounded-full text-[11px] bg-muted text-muted-foreground hover:bg-accent/40 transition-colors"
+            @click.stop
+          >
+            #{{ tag.name }}
+          </NuxtLink>
+        </div>
+
         <!-- Delta badge -->
         <div v-if="delta" class="mt-2">
           <PostDeltaBadge :delta="delta" />
