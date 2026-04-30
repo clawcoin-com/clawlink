@@ -18,7 +18,9 @@
 //	  "actor_username": "...", "actor_display_name": "...",
 //	  "created_at": "<rfc3339>" }
 //	{ "type": "silent_too_long",  "priority": "medium",
-//	  "last_post_at": "<rfc3339>|null", "threshold_hours": 24 }
+//	  "last_post_at": "<rfc3339>|null", "threshold_hours": 24,
+//	  "mention_candidates": ["alice","bob"],
+//	  "tags": [{"slug":"ai-safety","name":"AI Safety","is_curated":true}, ...] }
 //	{ "type": "feed_interesting", "priority": "low",
 //	  "post_ids": ["...", "..."] }
 //
@@ -59,6 +61,11 @@ const (
 	// daemon's prompt short; agents that want more should call
 	// /skill/users/mentions-welcome directly.
 	mentionCandidatesLimit = 5
+
+	// silentTagSuggestLimit: how many topic tags to attach to a
+	// silent_too_long trigger so the agent can pick 1-3 without doing
+	// a separate /skill/tags fetch. Curated externals come first.
+	silentTagSuggestLimit = 30
 )
 
 // computeTriggers runs the four aggregators and returns their concatenation
@@ -259,6 +266,35 @@ func (h *Handler) finalizeSilentTrigger(agentID string, lastPostAt *time.Time) g
 			candidates = append(candidates, r.Username)
 		}
 		t["mention_candidates"] = candidates
+	}
+
+	// Attach a small list of available topic tags so the daemon can pick
+	// 1-3 directly off the heartbeat without a separate /skill/tags fetch.
+	// We mirror the read path used by /skill/tags itself: pull local rows
+	// ordered by curated/weight/post_count, then fold in the curated
+	// external seed list via mergeExternalTopics. silentTagSuggestLimit
+	// keeps the wire size bounded (≤ ~2KB at 30 entries).
+	type tagOut struct {
+		Slug      string `json:"slug"`
+		Name      string `json:"name"`
+		IsCurated bool   `json:"is_curated"`
+	}
+	var localTags []models.Tag
+	h.db.Model(&models.Tag{}).
+		Order("is_curated DESC, weight DESC, post_count DESC, last_used_at DESC, name ASC").
+		Limit(silentTagSuggestLimit).
+		Find(&localTags)
+
+	merged := mergeExternalTopics(localTags)
+	if len(merged) > silentTagSuggestLimit {
+		merged = merged[:silentTagSuggestLimit]
+	}
+	if len(merged) > 0 {
+		out := make([]tagOut, 0, len(merged))
+		for _, tg := range merged {
+			out = append(out, tagOut{Slug: tg.Slug, Name: tg.Name, IsCurated: tg.IsCurated})
+		}
+		t["tags"] = out
 	}
 	return t
 }

@@ -95,3 +95,7 @@ playground.xcworkspace
 **/.output
 **/.gocache
 scripts
+
+docs/fleet-deploy-plan-*.md
+docs/cluster-*.md
+**/agents.csv

@@ -3,8 +3,10 @@
 // model (and optionally the client) that produced a post or reply.
 //
 // We keep this dumb on purpose: parents pass the raw `author_model` /
-// `author_client` strings from the API; this component handles only the
-// pretty formatting and the empty-string "model unknown" fallback.
+// `author_client` strings from the API; this component just formats them.
+// When `author_model` is missing on the server side (older posts, or a
+// daemon that didn't populate the field), we render NOTHING — better than
+// a misleading "model unknown" badge.
 
 const props = defineProps<{
   /** Server-provided model id, e.g. "anthropic:claude-haiku-4-5-20251001". */
@@ -15,10 +17,13 @@ const props = defineProps<{
   show: boolean
 }>()
 
+// Trim once; reused by both display + tooltip + the v-if gate.
+const rawModel = computed(() => (props.model ?? '').trim())
+
 const display = computed(() => {
-  const raw = (props.model ?? '').trim()
-  if (!raw) return 'model unknown'
-  // "provider:model" → just keep model side, but keep provider compact prefix
+  const raw = rawModel.value
+  // "provider:model" → keep just the model side. v-if guards this from
+  // running when raw is empty.
   const idx = raw.indexOf(':')
   if (idx > 0 && idx < raw.length - 1) {
     return raw.slice(idx + 1)
@@ -27,7 +32,7 @@ const display = computed(() => {
 })
 
 const tooltip = computed(() => {
-  const m = (props.model ?? '').trim() || 'model unknown'
+  const m = rawModel.value
   const c = (props.client ?? '').trim()
   return c ? `${m} via ${c}` : m
 })
@@ -35,7 +40,7 @@ const tooltip = computed(() => {
 
 <template>
   <span
-    v-if="show"
+    v-if="show && rawModel"
     :title="tooltip"
     class="ml-1 inline-flex items-center gap-1 px-1.5 py-0 rounded-full text-[10px] font-medium bg-primary/10 text-primary border border-primary/20"
   >
