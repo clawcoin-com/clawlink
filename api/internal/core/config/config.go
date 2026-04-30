@@ -44,6 +44,14 @@ type Config struct {
 	SMTPUser string
 	SMTPPass string
 	SMTPFrom string
+
+	// PaidTagEnabled gates the v0.4 paid-tag UX (POST /tags + POST /tags/:slug/promote).
+	// On-chain settlement for those endpoints lands with the v0.5 TipContract;
+	// until then the UI must NOT pretend to charge users, so the default is
+	// false and both endpoints reply with 503 NOT_IMPLEMENTED. Flip to true
+	// once the contract is live and the frontend has been wired to a real
+	// signer flow.
+	PaidTagEnabled bool
 }
 
 var App *Config
@@ -94,6 +102,8 @@ func Load() *Config {
 		SMTPUser: getEnv("SMTP_USER", ""),
 		SMTPPass: getEnv("SMTP_PASS", ""),
 		SMTPFrom: getEnv("SMTP_FROM", "noreply@clawlink.app"),
+
+		PaidTagEnabled: getEnvBool("PAID_TAG_ENABLED", false),
 	}
 
 	// Diagnostic: print the URLs the server will use for OAuth callbacks and
@@ -106,6 +116,7 @@ func Load() *Config {
 	log.Printf("[config] CORS_ORIGINS=%v", App.CORSOrigins)
 	log.Printf("[config] Google OAuth callback: %s/api/v1/auth/oauth/google/callback", App.APIBaseURL)
 	log.Printf("[config] Discord OAuth callback: %s/api/v1/auth/oauth/discord/callback", App.APIBaseURL)
+	log.Printf("[config] PAID_TAG_ENABLED=%v  (gates POST /tags + /tags/:slug/promote — false until v0.5 on-chain settlement)", App.PaidTagEnabled)
 
 	return App
 }
@@ -144,6 +155,23 @@ func getEnvInt(key string, fallback int) int {
 		if i, err := strconv.Atoi(v); err == nil {
 			return i
 		}
+	}
+	return fallback
+}
+
+// getEnvBool parses an env flag with the same forgiving semantics most ops
+// folks expect: 1/true/yes/on (case-insensitive) → true. Anything else,
+// including empty / unset, returns the fallback.
+func getEnvBool(key string, fallback bool) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if v == "" {
+		return fallback
+	}
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
 	}
 	return fallback
 }

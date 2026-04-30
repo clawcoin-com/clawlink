@@ -8,12 +8,29 @@ import (
     "sort"
     "time"
 
+    "github.com/clawcoin-com/clawlink/internal/core/config"
     "github.com/clawcoin-com/clawlink/internal/core/models"
     "github.com/clawcoin-com/clawlink/internal/middleware"
     "github.com/clawcoin-com/clawlink/internal/shared"
     "github.com/gin-gonic/gin"
     "gorm.io/gorm"
 )
+
+// paidTagDisabledMsg is the user-facing 503 body the gate returns. Kept as
+// a constant so the wording matches between the two endpoints and tests
+// can assert on it.
+const paidTagDisabledMsg = "paid tag creation/promotion is not open yet — on-chain settlement lands with v0.5; set PAID_TAG_ENABLED=1 once it is live"
+
+// paidTagsEnabled returns the runtime flag from config.App, defaulting to
+// false (closed) when config has not been loaded for some reason. Belt-
+// and-suspenders so a misconfigured deploy never accidentally accepts
+// fake fees.
+func paidTagsEnabled() bool {
+    if config.App == nil {
+        return false
+    }
+    return config.App.PaidTagEnabled
+}
 
 // middlewareCurrentUser is a tiny indirection so future tests can swap auth
 // without touching every handler. Today it just forwards to middleware.
@@ -162,7 +179,16 @@ const TagPromoteWindow = 24 * time.Hour
 // belongs to TipContract once it is live. Tags created by curated sources
 // (the external topic API) bypass this endpoint and are merged at read
 // time, so this fee only applies to user-initiated tag registration.
+//
+// Until PAID_TAG_ENABLED flips true, this endpoint returns 503 with code
+// NOT_IMPLEMENTED so the UI never has an excuse to pretend payment works.
+// Implicit tag creation while posting (handlers/post.go.attachHumanTags)
+// is unaffected — that path is free and always has been.
 func (h *TagHandler) Create(c *gin.Context) {
+    if !paidTagsEnabled() {
+        c.JSON(http.StatusServiceUnavailable, shared.Fail("NOT_IMPLEMENTED", paidTagDisabledMsg))
+        return
+    }
     user := h.currentUser(c)
     if user == nil {
         c.JSON(http.StatusUnauthorized, shared.Fail("UNAUTHORIZED", "login required"))
@@ -236,7 +262,13 @@ func (h *TagHandler) Create(c *gin.Context) {
 //
 // Each call extends PaidUntil by TagPromoteWindow from the current value
 // (or now, if the previous window already lapsed).
+//
+// Gated by PAID_TAG_ENABLED, same reasoning as Create above.
 func (h *TagHandler) Promote(c *gin.Context) {
+    if !paidTagsEnabled() {
+        c.JSON(http.StatusServiceUnavailable, shared.Fail("NOT_IMPLEMENTED", paidTagDisabledMsg))
+        return
+    }
     user := h.currentUser(c)
     if user == nil {
         c.JSON(http.StatusUnauthorized, shared.Fail("UNAUTHORIZED", "login required"))

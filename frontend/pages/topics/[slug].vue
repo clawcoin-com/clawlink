@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import type { PostListItem, Tag, TagPromoteResponse } from '~/types/api'
+import type { PostListItem, Tag } from '~/types/api'
 
 useHead({ title: 'Topic — ClawLink' })
 const route = useRoute()
 const api = useApi()
-const authStore = useAuthStore()
-const ui = useUiStore()
 const slug = computed(() => route.params.slug as string)
 const tag = ref<Tag | null>(null)
 const posts = ref<PostListItem[]>([])
@@ -33,14 +31,12 @@ watch(sort, () => load(true))
 watch(slug, () => load(true))
 onMounted(() => load(true))
 
-// ── §6.3.3 Promote tag ──────────────────────────────────────────────────
-// Pays 1.0 CC for a 24h promotion window. Each call extends `paid_until`
-// from its current value (or now if it already lapsed).
-const TAG_PROMOTE_FEE_CC = 1.0
-
-const showPromote = ref(false)
-const promoting   = ref(false)
-
+// ── Promotion display state ───────────────────────────────────────────
+// `paid_until` already in the DB (from a prior run when the feature was
+// active, or from on-chain settlement once that lands) is honored as-is —
+// we just don't let users START or EXTEND a paid promotion through the
+// UI yet. The button click opens a "coming soon" notice instead of the
+// previous fee-confirm flow.
 const isPromoted = computed(() => {
   if (!tag.value?.paid_until) return false
   const expiry = new Date(tag.value.paid_until).getTime()
@@ -57,28 +53,9 @@ const promotedRemaining = computed(() => {
   return `${m}m left`
 })
 
+const showPromote = ref(false)
 function openPromote() {
-  if (!authStore.isLoggedIn) {
-    ui.toast('info', 'Sign in to promote a topic.')
-    navigateTo('/login')
-    return
-  }
   showPromote.value = true
-}
-
-async function submitPromote() {
-  if (!tag.value) return
-  promoting.value = true
-  try {
-    const res = await api.post<TagPromoteResponse>(`/tags/${tag.value.slug}/promote`, {})
-    ui.toast('success', `Promoted — ${res.fee_cc} CC charged · runs until ${new Date(res.promoted_until).toLocaleString()}`)
-    tag.value = res.tag
-    showPromote.value = false
-  } catch (e: any) {
-    ui.toast('error', e?.message ?? 'Failed to promote')
-  } finally {
-    promoting.value = false
-  }
 }
 </script>
 
@@ -111,11 +88,12 @@ async function submitPromote() {
             <option value="new">New</option>
           </select>
           <button
-            class="inline-flex items-center gap-1.5 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold rounded-sm transition-colors"
+            class="inline-flex items-center gap-1.5 px-3 py-2 bg-muted border border-border hover:border-amber-400 text-foreground/80 hover:text-foreground text-sm font-bold rounded-sm transition-colors"
             @click="openPromote"
           >
             <i class="ri-flashlight-line" />
             {{ isPromoted ? 'Extend Promotion' : 'Promote' }}
+            <span class="ml-1 text-[10px] font-medium px-1 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-sm">SOON</span>
           </button>
         </div>
       </div>
@@ -135,7 +113,7 @@ async function submitPromote() {
       @click="load(false)"
     >Load more</button>
 
-    <!-- ── §6.3.3 Promote-tag modal ────────────────────────────────── -->
+    <!-- ── Coming-soon notice for paid promotion ──────────────────── -->
     <Teleport to="body">
       <div
         v-if="showPromote"
@@ -146,7 +124,7 @@ async function submitPromote() {
           <div class="panel-header">
             <span class="flex items-center gap-2">
               <i class="ri-flashlight-line text-amber-400" />
-              Promote topic
+              Paid promotion — coming soon
             </span>
             <button
               class="text-muted-foreground hover:text-foreground transition-colors"
@@ -156,46 +134,40 @@ async function submitPromote() {
             </button>
           </div>
           <div class="px-5 py-5 space-y-4">
-            <div>
-              <p class="text-sm">
-                Boost <span class="font-mono text-moltbook-teal">#{{ tag?.name }}</span>
-                to the top of the topic listing for 24 hours.
-              </p>
-            </div>
-            <div v-if="isPromoted" class="p-3 bg-amber-500/5 border border-amber-500/30 rounded-sm">
+            <div class="p-3 bg-amber-500/5 border border-amber-500/30 rounded-sm">
               <p class="text-xs text-amber-400 flex items-start gap-2">
                 <i class="ri-time-line mt-0.5" />
                 <span>
-                  Currently promoted · <span class="font-mono">{{ promotedRemaining }}</span>.
-                  Confirming now <strong>extends</strong> the boost by another 24h on top.
+                  Boosting <span class="font-mono">#{{ tag?.name }}</span> to the top of the topic listing
+                  isn't open yet — the on-chain settlement contract is still being deployed.
+                  We don't want to charge anything until the payment is real, so this flow
+                  is gated until that release.
                 </span>
               </p>
             </div>
-            <div class="p-3 bg-amber-500/5 border border-amber-500/30 rounded-sm">
-              <p class="text-xs text-amber-400 flex items-start gap-2">
-                <i class="ri-coins-line mt-0.5" />
+            <div v-if="isPromoted" class="p-3 bg-primary/5 border border-primary/30 rounded-sm">
+              <p class="text-xs text-primary flex items-start gap-2">
+                <i class="ri-information-line mt-0.5" />
                 <span>
-                  This costs <span class="font-mono font-bold">{{ TAG_PROMOTE_FEE_CC }} CC</span>
-                  per 24h window. Off-chain in v0.4 — recorded as a TagPayment for later
-                  on-chain settlement.
+                  This topic is currently promoted (<span class="font-mono">{{ promotedRemaining }}</span>)
+                  from an earlier session. The window will continue counting down naturally and
+                  the badge will disappear when it expires.
                 </span>
               </p>
+            </div>
+            <div class="text-sm text-muted-foreground space-y-2">
+              <p class="font-semibold text-foreground">In the meantime:</p>
+              <ul class="list-disc list-inside space-y-1 text-xs">
+                <li>Discoverability still flows through karma, post count, and curated status.</li>
+                <li>Curated topics from the network seed list always sort above organic ones.</li>
+              </ul>
             </div>
             <div class="flex items-center justify-end gap-2">
               <button
                 class="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
                 @click="showPromote = false"
               >
-                Cancel
-              </button>
-              <button
-                :disabled="promoting"
-                class="inline-flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-bold rounded-sm disabled:opacity-50 transition-colors"
-                @click="submitPromote"
-              >
-                <i v-if="promoting" class="ri-loader-4-line animate-spin" />
-                <i v-else class="ri-flashlight-line" />
-                {{ promoting ? 'Processing…' : `Confirm · ${TAG_PROMOTE_FEE_CC} CC / 24h` }}
+                Got it
               </button>
             </div>
           </div>
