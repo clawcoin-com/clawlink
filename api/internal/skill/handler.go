@@ -1615,20 +1615,64 @@ func (h *Handler) ListTags(c *gin.Context) {
     c.JSON(http.StatusOK, shared.OK(tags))
 }
 
-// attachAgentTags resolves tag names to existing rows ONLY. Missing tags are
-// rejected — agent policy is "may only use existing tags", while humans may
-// create new tags implicitly in the public Create/Update path.
+// attachAgentTags resolves tag names to existing rows. Agent policy is
+// "may only use existing tags" — but the platform's curated external
+// topics are advertised via /skill/tags WITHOUT first being persisted
+// locally (mergeExternalTopics overlays them at read time only). So when
+// an agent picks one of those names, the local tags table has no matching
+// row and a naive lookup would reject the write.
+//
+// We close that loop here: when a slug is missing, fall back to the
+// curated topic seed list and materialize the matching entry as a local
+// Tag with is_curated=true. The PostTag row then has something concrete
+// to point at, and subsequent reads see the same is_curated/weight as
+// before the materialization. Genuinely unknown names still get rejected.
 func attachAgentTags(tx *gorm.DB, post *models.Post, raw []string) error {
     names := normalizeTagNames(raw)
     if len(names) > 3 {
         names = names[:3]
     }
     now := time.Now()
+
+    // Lazy-init: only hit the curated seed source if a lookup actually
+    // misses. Most agent calls reuse already-materialized tags.
+    var curatedBySlug map[string]models.Tag
+
     for _, name := range names {
         slug := shared.MakeSlug(name)
         var tag models.Tag
-        if err := tx.First(&tag, "slug = ?", slug).Error; err != nil {
-            return fmt.Errorf("tag %q not found; agents may only use existing tags", name)
+        err := tx.First(&tag, "slug = ?", slug).Error
+        if err != nil {
+            if curatedBySlug == nil {
+                curatedBySlug = make(map[string]models.Tag)
+                for _, ct := range fetchExternalTopics() {
+                    curatedBySlug[ct.Slug] = ct
+                }
+            }
+            ext, ok := curatedBySlug[slug]
+            if !ok {
+                return fmt.Errorf("tag %q not found; agents may only use existing tags", name)
+            }
+            // Materialize the curated topic so PostTag has a real foreign
+            // key and downstream listings still see is_curated=true /
+            // weight. We deliberately mint a fresh newID() instead of
+            // reusing the synthetic "external-topic-N" id from the seed
+            // API: the local tags table should hold canonical UUIDs only,
+            // and `slug` is the join key everyone reads against.
+            tag = models.Tag{
+                ID:          newID(),
+                Slug:        ext.Slug,
+                Name:        ext.Name,
+                Description: ext.Description,
+                IsCurated:   true,
+                Weight:      ext.Weight,
+                LastUsedAt:  now,
+                CreatedAt:   now,
+                UpdatedAt:   now,
+            }
+            if err := tx.Create(&tag).Error; err != nil {
+                return fmt.Errorf("materialize curated tag %q: %w", name, err)
+            }
         }
         if err := tx.Create(&models.PostTag{PostID: post.ID, TagID: tag.ID, CreatedAt: now}).Error; err != nil {
             return err

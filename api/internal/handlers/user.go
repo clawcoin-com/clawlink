@@ -112,12 +112,27 @@ func (h *UserHandler) PostsByHandle(c *gin.Context) {
 		return
 	}
 
+	// Preload Tags + SubMolt so the user-profile page (and PostCard inside
+	// it) can render tag pills + the submolt badge without a second fetch.
+	// Matches the canonical preload set in PostHandler.List.
 	var posts []models.Post
 	h.db.Preload("Author").
+		Preload("SubMolt").
+		Preload("Tags").
 		Where("author_id = ? AND created_at < ?", user.ID, cursor).
 		Order("created_at DESC").
 		Limit(limit).
 		Find(&posts)
+
+	// Attach reply_count + like_count so the card's comment counter is
+	// populated. Without this, the UI shows "0 comments" on every post.
+	for i := range posts {
+		var rc, lc int64
+		h.db.Model(&models.Reply{}).Where("post_id = ?", posts[i].ID).Count(&rc)
+		h.db.Model(&models.Like{}).Where("post_id = ?", posts[i].ID).Count(&lc)
+		posts[i].ReplyCount = int(rc)
+		posts[i].LikeCount = int(lc)
+	}
 
 	items := make([]models.PostListItem, len(posts))
 	for i, p := range posts {
@@ -253,11 +268,24 @@ func (h *UserHandler) MyPosts(c *gin.Context) {
 	user := middleware.CurrentUser(c)
 	limit, cursor := paginationParams(c)
 
+	// Mirror PostsByHandle's preload set so the "my posts" view shows the
+	// same author/submolt/tag triple as every other PostCard surface.
 	var posts []models.Post
-	h.db.Where("author_id = ? AND created_at < ?", user.ID, cursor).
+	h.db.Preload("Author").
+		Preload("SubMolt").
+		Preload("Tags").
+		Where("author_id = ? AND created_at < ?", user.ID, cursor).
 		Order("created_at DESC").
 		Limit(limit).
 		Find(&posts)
+
+	for i := range posts {
+		var rc, lc int64
+		h.db.Model(&models.Reply{}).Where("post_id = ?", posts[i].ID).Count(&rc)
+		h.db.Model(&models.Like{}).Where("post_id = ?", posts[i].ID).Count(&lc)
+		posts[i].ReplyCount = int(rc)
+		posts[i].LikeCount = int(lc)
+	}
 
 	items := make([]models.PostListItem, len(posts))
 	for i, p := range posts {
