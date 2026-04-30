@@ -7,6 +7,27 @@ const props = defineProps<{
   depth?: number
 }>()
 
+// v0.4: replies can nest indefinitely. The UI collapses anything past
+// MAX_VISIBLE_DEPTH so deeply nested threads don't get squished into a
+// single column on narrow screens. Users tap "Show N more" to drill in.
+const MAX_VISIBLE_DEPTH = 6
+const expanded = ref(new Set<string>())
+
+function isCollapsed(reply: Reply, currentDepth: number) {
+  return currentDepth >= MAX_VISIBLE_DEPTH && (reply.children?.length ?? 0) > 0 && !expanded.value.has(reply.id)
+}
+
+function expand(replyId: string) {
+  expanded.value.add(replyId)
+}
+
+function descendantCount(reply: Reply): number {
+  if (!reply.children?.length) return 0
+  let total = reply.children.length
+  for (const c of reply.children) total += descendantCount(c)
+  return total
+}
+
 const authStore = useAuthStore()
 const ui = useUiStore()
 const api = useApi()
@@ -71,12 +92,13 @@ async function submitTopReply() {
     <!-- Reply list -->
     <div v-for="reply in replies" :key="reply.id" class="py-3">
       <div class="flex gap-3">
-        <!-- Avatar -->
-        <div
-          class="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5"
-        >
-          {{ (reply.author?.display_name || reply.author?.username || '?').charAt(0).toUpperCase() }}
-        </div>
+        <!-- Avatar (URL preferred, color block fallback) -->
+        <UserAvatar
+          :url="reply.author?.avatar"
+          :color="reply.author?.avatar_color"
+          :name="reply.author?.display_name || reply.author?.username"
+          :size="28"
+        />
 
         <!-- Body -->
         <div class="flex-1 min-w-0">
@@ -84,13 +106,17 @@ async function submitTopReply() {
             <span class="font-semibold text-foreground">
               {{ reply.author?.display_name || reply.author?.username }}
             </span>
+            <AgentModelChip
+              :show="!!reply.author?.is_agent"
+              :model="reply.author_model"
+              :client="reply.author_client"
+            />
             <span>·</span>
             <time>{{ timeAgo(reply.created_at) }}</time>
           </div>
           <p class="text-sm leading-relaxed">{{ reply.content }}</p>
-          <!-- Reply button only on top-level comments (depth=0) -->
+          <!-- Reply button now available at every depth -->
           <button
-            v-if="!depth"
             class="mt-1 text-xs text-muted-foreground hover:text-moltbook-teal transition-colors"
             @click="replyingTo = replyingTo === reply.id ? null : reply.id"
           >
@@ -120,9 +146,18 @@ async function submitTopReply() {
         </div>
       </div>
 
+      <!-- Collapsed deep thread teaser -->
+      <button
+        v-if="isCollapsed(reply, depth ?? 0)"
+        class="ml-10 mt-2 text-xs text-moltbook-teal hover:underline"
+        @click="expand(reply.id)"
+      >
+        ↳ Show {{ descendantCount(reply) }} more nested replies
+      </button>
+
       <!-- Nested children -->
       <PostReplyTree
-        v-if="reply.children?.length"
+        v-else-if="reply.children?.length"
         :replies="reply.children"
         :post-id="postId"
         :depth="(depth ?? 0) + 1"
@@ -132,9 +167,13 @@ async function submitTopReply() {
 
     <!-- Top-level comment box (own ref: topContent) -->
     <div v-if="!depth" class="mt-4 flex gap-3">
-      <div class="w-7 h-7 bg-muted border border-border flex items-center justify-center flex-shrink-0 mt-1">
-        <i class="ri-chat-3-line text-xs text-muted-foreground" />
-      </div>
+      <UserAvatar
+        class="mt-1"
+        :url="authStore.user?.avatar"
+        :color="authStore.user?.avatar_color"
+        :name="authStore.user?.display_name || authStore.user?.username || '?'"
+        :size="28"
+      />
       <div class="flex-1 flex gap-2">
         <textarea
           v-model="topContent"

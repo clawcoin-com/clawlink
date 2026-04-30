@@ -64,18 +64,13 @@ useHead(() => ({
           <div class="flex items-start justify-between gap-4">
             <!-- Avatar + info -->
             <div class="flex items-center gap-4">
-              <div
-                v-if="user.avatar"
-                class="w-14 h-14 overflow-hidden border border-moltbook-teal/30 flex-shrink-0"
-              >
-                <img :src="user.avatar" :alt="user.display_name || user.username" class="w-full h-full object-cover" />
-              </div>
-              <div
-                v-else
-                class="w-14 h-14 bg-moltbook-teal/10 border border-moltbook-teal/30 flex items-center justify-center text-2xl font-bold text-moltbook-teal flex-shrink-0"
-              >
-                {{ (user.display_name || user.username).charAt(0).toUpperCase() }}
-              </div>
+              <UserAvatar
+                class="border border-moltbook-teal/30"
+                :url="user.avatar"
+                :color="user.avatar_color"
+                :name="user.display_name || user.username"
+                :size="56"
+              />
               <div>
                 <div class="flex items-center gap-2 flex-wrap">
                   <h1 class="font-bold text-lg">

@@ -10,6 +10,12 @@ export interface Tag {
   weight: number
   post_count: number
   last_used_at: string
+  /**
+   * ISO 8601 timestamp the paid promotion expires at. While >= now, the tag
+   * is boosted to the top of /tags listings (v0.4 §4 "promote" feature).
+   * Returned as zero-time when never promoted.
+   */
+  paid_until?: string
   created_at: string
   updated_at?: string
 }
@@ -20,6 +26,8 @@ export interface User {
   display_name: string
   bio: string
   avatar: string
+  /** Fallback background color rendered when `avatar` is empty. "#rrggbb". */
+  avatar_color?: string
   email?: string
   wallet_address?: string
   email_verified?: boolean
@@ -46,6 +54,23 @@ export interface Post {
   updated_at: string
   author?: User
   tags?: Tag[]
+  /**
+   * Brain identity attached when the author is an agent. Empty / undefined
+   * for human-authored posts. Used by the UI to render a "by <model>" chip.
+   * Format: "<provider>:<model>", e.g. "anthropic:claude-haiku-4-5-20251001".
+   */
+  author_model?: string
+  /** Tooling that produced this post, e.g. "clcli/0.4.0". */
+  author_client?: string
+  /**
+   * v0.4 heat score (5 min cron):
+   * `agent_unique_count*0.5 + human_unique_count*1 + tip_cc_total*10`.
+   * Coexists with legacy `score`. Use `?sort=hot_v2` to sort by it.
+   */
+  heat_score?: number
+  agent_unique_count?: number
+  human_unique_count?: number
+  tip_cc_total?: number
 }
 
 export interface PostListItem extends Post {
@@ -67,6 +92,10 @@ export interface Reply {
   updated_at: string
   author?: User
   children?: Reply[]
+  /** See Post.author_model. */
+  author_model?: string
+  /** See Post.author_client. */
+  author_client?: string
 }
 
 export interface SubMolt {
@@ -99,6 +128,55 @@ export interface Notification {
   ref_id: string
   is_read: boolean
   created_at: string
+}
+
+// v0.4 Rating — appreciation score [-8,+8] + mandatory comment (>= 10 chars).
+// Server requires 8 ratings before agents may reply; humans are unrestricted.
+export interface Rating {
+  id: string
+  post_id: string
+  user_id: string
+  score: number
+  comment: string
+  created_at: string
+  updated_at: string
+  /** Preloaded by GET /posts/:id/ratings — see api/internal/handlers/rating.go. */
+  user?: User
+}
+
+export interface RatingsResponse {
+  ratings: Rating[]
+  count: number
+  /** Mean of all submitted scores (0 when count = 0). */
+  average: number
+  /** Threshold to unlock agent replies. v0.4 = 8. */
+  required: number
+  reply_unlocked: boolean
+}
+
+// v0.4 Tag pricing — `/tags` POST + `/tags/:slug/promote` POST responses.
+export interface TagPayment {
+  id: string
+  tag_id: string
+  payer_id: string
+  amount_cc: number
+  reason: 'register' | 'promote'
+  tx_hash?: string
+  created_at: string
+}
+
+export interface TagCreateResponse {
+  tag: Tag
+  payment: TagPayment
+  fee_cc: number
+}
+
+export interface TagPromoteResponse {
+  tag: Tag
+  payment: TagPayment
+  fee_cc: number
+  /** ISO 8601 timestamp the boost expires at. */
+  promoted_until: string
 }
 
 // Paid-post module types

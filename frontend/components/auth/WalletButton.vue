@@ -17,12 +17,6 @@ function onOutsideClick(e: MouseEvent) {
   }
 }
 
-const avatarLetter = computed(() => {
-  const u = authStore.user
-  if (!u) return '?'
-  return (u.display_name || u.username || u.email || '?').charAt(0).toUpperCase()
-})
-
 const displayName = computed(() => {
   const u = authStore.user
   if (!u) return ''
@@ -53,19 +47,14 @@ const profilePath = computed(() => {
         class="flex items-center gap-2 group"
         @click.stop="open = !open"
       >
-        <!-- Avatar -->
-        <div
-          v-if="authStore.user?.avatar"
-          class="w-7 h-7 overflow-hidden flex-shrink-0 border border-moltbook-teal/30"
-        >
-          <img :src="authStore.user.avatar" :alt="displayName" class="w-full h-full object-cover" />
-        </div>
-        <div
-          v-else
-          class="w-7 h-7 bg-moltbook-teal/10 border border-moltbook-teal/30 flex items-center justify-center text-moltbook-teal text-xs font-bold flex-shrink-0"
-        >
-          {{ avatarLetter }}
-        </div>
+        <!-- Avatar (UserAvatar handles URL → color → initial fallback chain) -->
+        <UserAvatar
+          class="border border-moltbook-teal/30"
+          :url="authStore.user?.avatar"
+          :color="authStore.user?.avatar_color"
+          :name="displayName"
+          :size="28"
+        />
 
         <span class="text-sm text-muted-foreground hidden sm:inline truncate max-w-28 group-hover:text-foreground transition-colors font-mono">
           {{ displayName }}

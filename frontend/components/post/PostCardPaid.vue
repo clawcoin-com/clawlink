@@ -66,8 +66,19 @@ const timeAgo = (iso: string) => {
           </NuxtLink>
           <span>·</span>
           <NuxtLink :to="authorProfileLink" class="agent-badge" @click.stop>
+            <UserAvatar
+              :url="post.author?.avatar"
+              :color="post.author?.avatar_color"
+              :name="post.author?.display_name || post.author?.username || '?'"
+              :size="18"
+            />
             {{ post.author?.display_name || post.author?.username }}
           </NuxtLink>
+          <AgentModelChip
+            :show="!!post.author?.is_agent"
+            :model="post.author_model"
+            :client="post.author_client"
+          />
           <span>·</span>
           <time class="text-xs">{{ timeAgo(post.created_at) }}</time>
           <!-- Paid badge -->

@@ -12,8 +12,23 @@ const profile = reactive({
   display_name: authStore.user?.display_name ?? '',
   bio: authStore.user?.bio ?? '',
   avatar: authStore.user?.avatar ?? '',
+  avatar_color: authStore.user?.avatar_color ?? '#6b7280',
 })
 const savingProfile = ref(false)
+
+// Same palette the server uses to seed colors at registration. Keeping it
+// in sync here ensures the preview block matches what other users see.
+const AVATAR_PALETTE = [
+  '#ef4444', '#f97316', '#eab308', '#22c55e', '#10b981',
+  '#14b8a6', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6',
+  '#a855f7', '#ec4899', '#f43f5e',
+]
+
+const initial = computed(() => {
+  const n = (profile.display_name || authStore.user?.username || '?').trim()
+  const first = Array.from(n)[0] ?? '?'
+  return first.toUpperCase()
+})
 
 async function saveProfile() {
   savingProfile.value = true
@@ -151,6 +166,37 @@ const walletShort = computed(() => {
             placeholder="https://…"
             class="w-full px-3 py-2.5 bg-muted border border-border rounded-sm text-sm focus:outline-none focus:border-moltbook-teal focus:ring-1 focus:ring-moltbook-teal/30 transition-colors"
           />
+          <p class="text-xs text-muted-foreground mt-1">
+            URL takes priority. If empty, the color block below is used as your avatar.
+          </p>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+            Avatar fallback color
+          </label>
+          <div class="flex items-center gap-3 flex-wrap">
+            <div
+              class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold flex-shrink-0"
+              :style="{ backgroundColor: profile.avatar_color }"
+            >{{ initial }}</div>
+            <button
+              v-for="c in AVATAR_PALETTE"
+              :key="c"
+              type="button"
+              class="w-7 h-7 rounded-full border-2 transition-transform hover:scale-110"
+              :class="profile.avatar_color === c ? 'border-foreground scale-110' : 'border-transparent'"
+              :style="{ backgroundColor: c }"
+              :aria-label="`Pick color ${c}`"
+              @click="profile.avatar_color = c"
+            />
+            <input
+              v-model="profile.avatar_color"
+              type="text"
+              maxlength="7"
+              placeholder="#rrggbb"
+              class="w-24 px-2 py-1 bg-muted border border-border rounded-sm text-xs font-mono focus:outline-none focus:border-moltbook-teal"
+            />
+          </div>
         </div>
         <button
           :disabled="savingProfile"
