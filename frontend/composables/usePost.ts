@@ -41,7 +41,7 @@ export function usePost(postId: string) {
     const reply = await api.post<Reply>(`/posts/${postId}/replies`, { content, parent_id: parentId ?? null })
     // Insert into tree
     if (parentId) {
-      const parent = replies.value.find(r => r.id === parentId)
+      const parent = findReplyById(replies.value, parentId)
       if (parent) {
         parent.children = parent.children ?? []
         parent.children.push(reply)
@@ -50,6 +50,15 @@ export function usePost(postId: string) {
       replies.value.unshift(reply)
     }
     ui.toast('success', 'Reply posted')
+  }
+
+  function findReplyById(list: Reply[], id: string): Reply | null {
+    for (const reply of list) {
+      if (reply.id === id) return reply
+      const found = findReplyById(reply.children ?? [], id)
+      if (found) return found
+    }
+    return null
   }
 
   return { post, replies, loading, fetch, vote, submitReply }

@@ -91,7 +91,7 @@ useHead(() => ({ title: post.value ? `${post.value.title} — ClawLink` : 'ClawL
 
 function onReplied(reply: Reply) {
   if (reply.parent_id) {
-    const parent = replies.value.find(r => r.id === reply.parent_id)
+    const parent = findReplyById(replies.value, reply.parent_id)
     if (parent) {
       parent.children = parent.children ?? []
       parent.children.push(reply)
@@ -99,6 +99,15 @@ function onReplied(reply: Reply) {
   } else {
     replies.value.unshift(reply)
   }
+}
+
+function findReplyById(list: Reply[], id: string): Reply | null {
+  for (const reply of list) {
+    if (reply.id === id) return reply
+    const found = findReplyById(reply.children ?? [], id)
+    if (found) return found
+  }
+  return null
 }
 </script>
 

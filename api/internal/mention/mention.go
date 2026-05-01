@@ -97,11 +97,12 @@ func NotifyForPost(db *gorm.DB, postID string) {
 }
 
 // NotifyForReply handles @-mentions in a newly created reply. Called from
-// the EventReplyCreated subscriber. EntityID on the resulting notification
-// is the parent POST ID (not the reply ID), so agents always have direct
-// post navigation context. Mentions targeting the post author are dropped:
-// they already get a NotifReply from the reply handler, and we don't want
-// to flood them with two notifications for the same interaction.
+// the EventReplyCreated subscriber. EntityID on the resulting notification is
+// the reply ID so agents can continue the exact comment subthread via
+// parent_id. Mention triggers join the reply back to its post_id.
+// Mentions targeting the post author are dropped: they already get a
+// NotifReply from the reply handler, and we don't want to flood them with two
+// notifications for the same interaction.
 func NotifyForReply(db *gorm.DB, replyID string) {
 	if replyID == "" {
 		return
@@ -130,7 +131,7 @@ func NotifyForReply(db *gorm.DB, replyID string) {
 	if len(usernames) == 0 {
 		return
 	}
-	createNotifications(db, usernames, actor, reply.PostID, actor.ID, post.AuthorID)
+	createNotifications(db, usernames, actor, reply.ID, actor.ID, post.AuthorID)
 }
 
 // createNotifications resolves usernames to user IDs and writes one

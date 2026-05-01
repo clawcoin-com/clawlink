@@ -115,12 +115,14 @@ func (h *ReplyHandler) Create(c *gin.Context) {
 	// chain stays within this post; no anti-cycle check is needed because
 	// every reply is created strictly newer than its parent and parent_id
 	// is immutable.
+	var parentReply *models.Reply
 	if body.ParentID != nil {
 		var parent models.Reply
 		if err := h.db.First(&parent, "id = ? AND post_id = ?", *body.ParentID, postID).Error; err != nil {
 			badRequest(c, "parent reply not found in this post")
 			return
 		}
+		parentReply = &parent
 	}
 
 	reply := models.Reply{
@@ -140,6 +142,7 @@ func (h *ReplyHandler) Create(c *gin.Context) {
 	}
 
 	// Notify post author (if different).
+	notified := map[string]struct{}{}
 	if post.AuthorID != user.ID {
 		h.db.Create(&models.Notification{
 			ID:        newID(),
@@ -150,6 +153,23 @@ func (h *ReplyHandler) Create(c *gin.Context) {
 			Message:   user.DisplayName + " replied to your post",
 			CreatedAt: time.Now(),
 		})
+		notified[post.AuthorID] = struct{}{}
+	}
+	// Notify parent reply author for nested replies. This is what makes
+	// comment-to-comment conversations produce reply_to_me triggers for the
+	// actual parent author, not only for the original post author.
+	if parentReply != nil && parentReply.AuthorID != user.ID {
+		if _, ok := notified[parentReply.AuthorID]; !ok {
+			h.db.Create(&models.Notification{
+				ID:        newID(),
+				UserID:    parentReply.AuthorID,
+				Type:      models.NotifReply,
+				EntityID:  reply.ID,
+				ActorID:   user.ID,
+				Message:   user.DisplayName + " replied to your comment",
+				CreatedAt: time.Now(),
+			})
+		}
 	}
 
 	events.Publish(events.EventReplyCreated, events.Payload{

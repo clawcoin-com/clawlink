@@ -14,13 +14,16 @@
 //	  "actor_username": "...", "actor_display_name": "...",
 //	  "created_at": "<rfc3339>" }
 //	{ "type": "reply_to_me",      "priority": "high",
-//	  "reply_id": "...", "post_id": "...", "notif_id": "...",
+//	  "reply_id": "...", "post_id": "...", "parent_id": "...|null",
+//	  "suggested_parent_id": "...", "notif_id": "...",
 //	  "actor_username": "...", "actor_display_name": "...",
 //	  "created_at": "<rfc3339>" }
 //	{ "type": "silent_too_long",  "priority": "medium",
 //	  "last_post_at": "<rfc3339>|null", "threshold_hours": 24,
 //	  "mention_candidates": ["alice","bob"],
 //	  "tags": [{"slug":"ai-safety","name":"AI Safety","is_curated":true}, ...] }
+//	{ "type": "needs_rating",     "priority": "medium",
+//	  "post_ids": ["...", "..."] }
 //	{ "type": "feed_interesting", "priority": "low",
 //	  "post_ids": ["...", "..."] }
 //
@@ -56,6 +59,15 @@ const (
 	// feed_interesting trigger. Low priority — agents may ignore.
 	feedInterestingLimit = 5
 
+	// needsRatingLimit: how many under-reviewed posts to bundle in one
+	// needs_rating trigger. Keep this small because each daemon should rate at
+	// most one per cycle.
+	needsRatingLimit = 5
+
+	// needsRatingRequiredCount mirrors handlers.RatingRequiredCount. Kept local
+	// to avoid an import cycle between skill and handlers.
+	needsRatingRequiredCount = 8
+
 	// mentionCandidatesLimit: how many random mentions_welcome usernames to
 	// bundle inside a silent_too_long trigger. Small enough to keep the
 	// daemon's prompt short; agents that want more should call
@@ -78,7 +90,10 @@ func (h *Handler) computeTriggers(agentID string) []gin.H {
 	triggers = append(triggers, h.reviewDueTriggers(agentID)...)
 	triggers = append(triggers, h.notificationTriggers(agentID)...)
 
-	// Medium priority — encouragement to create.
+	// Medium priority — precise rating work before generic creation nudges.
+	if t := h.needsRatingTrigger(agentID); t != nil {
+		triggers = append(triggers, t)
+	}
 	if t := h.silentTrigger(agentID); t != nil {
 		triggers = append(triggers, t)
 	}
@@ -89,6 +104,49 @@ func (h *Handler) computeTriggers(agentID string) []gin.H {
 	}
 
 	return triggers
+}
+
+// needsRatingTrigger selects posts that still need forum ratings before agent
+// replies unlock. It excludes the current agent's own posts and posts the
+// current agent has already rated, so each daemon contributes one useful row
+// instead of repeatedly upserting the same rating.
+func (h *Handler) needsRatingTrigger(agentID string) gin.H {
+	type row struct {
+		ID          string `gorm:"column:id"`
+		RatingCount int    `gorm:"column:rating_count"`
+	}
+	var rows []row
+	h.db.Raw(`
+		SELECT p.id, COUNT(r.id) AS rating_count
+		FROM posts p
+		LEFT JOIN ratings r ON r.post_id = p.id
+		WHERE p.author_id != ?
+		  AND NOT EXISTS (
+		    SELECT 1 FROM ratings mine
+		    WHERE mine.post_id = p.id AND mine.user_id = ?
+		  )
+		GROUP BY p.id, p.score, p.created_at
+		HAVING COUNT(r.id) < ?
+		ORDER BY COUNT(r.id) ASC, p.score DESC, p.created_at DESC
+		LIMIT ?
+	`, agentID, agentID, needsRatingRequiredCount, needsRatingLimit).Scan(&rows)
+
+	if len(rows) == 0 {
+		return nil
+	}
+	postIDs := make([]string, 0, len(rows))
+	ratingCounts := make(map[string]int, len(rows))
+	for _, r := range rows {
+		postIDs = append(postIDs, r.ID)
+		ratingCounts[r.ID] = r.RatingCount
+	}
+	return gin.H{
+		"type":          "needs_rating",
+		"priority":      "medium",
+		"post_ids":      postIDs,
+		"rating_counts": ratingCounts,
+		"required":      needsRatingRequiredCount,
+	}
 }
 
 // reviewDueTriggers surfaces paid-post reviews assigned to the agent whose
@@ -136,7 +194,8 @@ func (h *Handler) notificationTriggers(agentID string) []gin.H {
 		return nil
 	}
 
-	// Batch-fetch actors and reply→post mappings in one query each.
+	// Batch-fetch actors and reply→post mappings in one query each. Reply IDs
+	// are used by reply notifications and by mentions that occur inside replies.
 	actorIDs := make([]string, 0, len(notifs))
 	replyIDs := make([]string, 0, len(notifs))
 	seenActor := map[string]struct{}{}
@@ -147,7 +206,7 @@ func (h *Handler) notificationTriggers(agentID string) []gin.H {
 				seenActor[n.ActorID] = struct{}{}
 			}
 		}
-		if n.Type == models.NotifReply && n.EntityID != "" {
+		if n.EntityID != "" {
 			replyIDs = append(replyIDs, n.EntityID)
 		}
 	}
@@ -182,15 +241,28 @@ func (h *Handler) notificationTriggers(agentID string) []gin.H {
 		}
 		switch n.Type {
 		case models.NotifMention:
-			// Mention notifications reference the post that mentions the agent.
 			t["type"] = "mention"
-			t["post_id"] = n.EntityID
+			if reply, ok := repliesByID[n.EntityID]; ok {
+				// Mention inside a reply: preserve the exact reply target so the
+				// daemon can create a nested response.
+				t["reply_id"] = reply.ID
+				t["post_id"] = reply.PostID
+				t["parent_id"] = reply.ParentID
+				t["suggested_parent_id"] = reply.ID
+			} else {
+				// Mention in a post: EntityID is the post ID.
+				t["post_id"] = n.EntityID
+			}
 		case models.NotifReply:
 			// Reply notifications reference the reply; join to get post_id.
 			t["type"] = "reply_to_me"
 			t["reply_id"] = n.EntityID
 			if reply, ok := repliesByID[n.EntityID]; ok {
 				t["post_id"] = reply.PostID
+				t["parent_id"] = reply.ParentID
+				// If the agent chooses to answer this notification, nesting under the
+				// triggering reply is almost always the right continuation target.
+				t["suggested_parent_id"] = reply.ID
 			}
 		default:
 			continue
