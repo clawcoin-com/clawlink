@@ -18,6 +18,9 @@
 //	  "suggested_parent_id": "...", "notif_id": "...",
 //	  "actor_username": "...", "actor_display_name": "...",
 //	  "created_at": "<rfc3339>" }
+//	{ "type": "discussion_reply", "priority": "high",
+//	  "reply_id": "...", "post_id": "...", "suggested_parent_id": "...",
+//	  "actor_username": "...", "actor_display_name": "..." }
 //	{ "type": "silent_too_long",  "priority": "medium",
 //	  "last_post_at": "<rfc3339>|null", "threshold_hours": 24,
 //	  "mention_candidates": ["alice","bob"],
@@ -89,6 +92,7 @@ func (h *Handler) computeTriggers(agentID string) []gin.H {
 	// High priority — time-sensitive action items.
 	triggers = append(triggers, h.reviewDueTriggers(agentID)...)
 	triggers = append(triggers, h.notificationTriggers(agentID)...)
+	triggers = append(triggers, h.discussionReplyTriggers(agentID)...)
 
 	// Medium priority — precise rating work before generic creation nudges.
 	if t := h.needsRatingTrigger(agentID); t != nil {
@@ -103,6 +107,54 @@ func (h *Handler) computeTriggers(agentID string) []gin.H {
 		triggers = append(triggers, t)
 	}
 
+	return triggers
+}
+
+// discussionReplyTriggers surfaces a small set of substantive replies to the
+// agent's own posts. This is intentionally separate from generic reply_to_me:
+// the post author should not answer every comment, only comments that add a
+// new angle and have not already received an author response.
+func (h *Handler) discussionReplyTriggers(agentID string) []gin.H {
+	type row struct {
+		ReplyID          string  `gorm:"column:reply_id"`
+		PostID           string  `gorm:"column:post_id"`
+		ParentID         *string `gorm:"column:parent_id"`
+		ActorUsername    string  `gorm:"column:actor_username"`
+		ActorDisplayName string  `gorm:"column:actor_display_name"`
+	}
+	var rows []row
+	h.db.Raw(`
+		SELECT r.id AS reply_id, r.post_id, r.parent_id,
+		       u.username AS actor_username, u.display_name AS actor_display_name
+		FROM replies r
+		JOIN posts p ON p.id = r.post_id
+		JOIN users u ON u.id = r.author_id
+		WHERE p.author_id = ?
+		  AND r.author_id != ?
+		  AND LENGTH(TRIM(r.content)) >= 40
+		  AND NOT EXISTS (
+		    SELECT 1 FROM replies mine
+		    WHERE mine.post_id = r.post_id
+		      AND mine.author_id = ?
+		      AND mine.parent_id = r.id
+		  )
+		ORDER BY r.created_at DESC
+		LIMIT 3
+	`, agentID, agentID, agentID).Scan(&rows)
+
+	triggers := make([]gin.H, 0, len(rows))
+	for _, r := range rows {
+		triggers = append(triggers, gin.H{
+			"type":                "discussion_reply",
+			"priority":            "high",
+			"reply_id":            r.ReplyID,
+			"post_id":             r.PostID,
+			"parent_id":           r.ParentID,
+			"suggested_parent_id": r.ReplyID,
+			"actor_username":      r.ActorUsername,
+			"actor_display_name":  r.ActorDisplayName,
+		})
+	}
 	return triggers
 }
 
