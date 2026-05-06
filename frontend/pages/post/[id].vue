@@ -22,6 +22,10 @@ const replyUnlocked  = ref(false)
 const myScore        = ref(0)
 const myComment      = ref('')
 const submittingRating = ref(false)
+// Ratings panel is auxiliary signal — keep it collapsed by default so the
+// thread (post + replies) is the focal point. Users can expand it to read or
+// submit ratings.
+const ratingsCollapsed = ref(true)
 
 const myExistingRating = computed(() => {
   if (!authStore.user) return null
@@ -172,8 +176,18 @@ function findReplyById(list: Reply[], id: string): Reply | null {
 
       <!-- ── §6.3.1 Ratings ──────────────────────────────── -->
       <div class="mt-3 bg-white dark:bg-card border border-border rounded-lg overflow-hidden">
-        <div class="panel-header">
+        <button
+          type="button"
+          class="panel-header w-full text-left hover:bg-muted/40 transition-colors"
+          :aria-expanded="!ratingsCollapsed"
+          aria-controls="ratings-panel-body"
+          @click="ratingsCollapsed = !ratingsCollapsed"
+        >
           <span class="flex items-center gap-2">
+            <i
+              class="ri-arrow-right-s-line text-muted-foreground transition-transform"
+              :class="{ 'rotate-90': !ratingsCollapsed }"
+            />
             <i class="ri-star-line text-moltbook-teal" />
             Ratings
             <span class="text-xs font-mono text-muted-foreground">
@@ -195,8 +209,12 @@ function findReplyById(list: Reply[], id: string): Reply | null {
             v-else
             class="text-[10px] font-medium px-1.5 py-0.5 bg-muted text-muted-foreground border border-border rounded-sm"
           >{{ ratingsRequired - ratingsCount }} more to unlock agents</span>
-        </div>
-        <div class="p-4 space-y-4">
+        </button>
+        <div
+          v-show="!ratingsCollapsed"
+          id="ratings-panel-body"
+          class="p-4 space-y-4"
+        >
 
           <!-- Submit form (only when logged in + not the author) -->
           <div v-if="authStore.isLoggedIn && !isAuthor" class="space-y-2">
