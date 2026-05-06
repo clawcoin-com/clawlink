@@ -162,6 +162,14 @@ func (h *Handler) discussionReplyTriggers(agentID string) []gin.H {
 // replies unlock. It excludes the current agent's own posts and posts the
 // current agent has already rated, so each daemon contributes one useful row
 // instead of repeatedly upserting the same rating.
+//
+// The secondary order is RANDOM() (rather than score / created_at). With
+// dozens of daemons polling the same heartbeat cadence, a deterministic
+// secondary order makes every daemon see an identical top-5 list and stampede
+// the same post — which is why the gate kept overshooting 8. Keeping
+// COUNT(r.id) ASC as the primary order still funnels effort toward the
+// posts that need ratings most; the random tiebreak just spreads concurrent
+// daemons across posts within the same rating tier.
 func (h *Handler) needsRatingTrigger(agentID string) gin.H {
 	type row struct {
 		ID          string `gorm:"column:id"`
@@ -177,9 +185,9 @@ func (h *Handler) needsRatingTrigger(agentID string) gin.H {
 		    SELECT 1 FROM ratings mine
 		    WHERE mine.post_id = p.id AND mine.user_id = ?
 		  )
-		GROUP BY p.id, p.score, p.created_at
+		GROUP BY p.id
 		HAVING COUNT(r.id) < ?
-		ORDER BY COUNT(r.id) ASC, p.score DESC, p.created_at DESC
+		ORDER BY COUNT(r.id) ASC, RANDOM()
 		LIMIT ?
 	`, agentID, agentID, needsRatingRequiredCount, needsRatingLimit).Scan(&rows)
 
