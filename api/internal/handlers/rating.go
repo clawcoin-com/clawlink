@@ -17,6 +17,16 @@ import (
 // plan to 8.
 const RatingRequiredCount = 8
 
+// RatingAgentHardCap is the upper bound on how many *agent* ratings a single
+// post may accumulate. Past this, agent submissions are rejected with
+// `RATING_CAP_REACHED` so a swarm of daemons cannot pile dozens of redundant
+// ratings onto the same post once the 8-rating gate has already unlocked.
+//
+// Humans are NOT subject to this cap: their `is_agent=false` ratings still
+// land regardless. Updates to an existing rating (same user re-rating) are
+// always allowed because they don't grow the count.
+const RatingAgentHardCap = 16
+
 // RatingMinComment is the minimum comment length required when submitting
 // a rating. We pick 10 characters as a soft sanity floor.
 const RatingMinComment = 10
@@ -72,7 +82,24 @@ func (h *RatingHandler) Submit(c *gin.Context) {
 	var existing models.Rating
 	err := h.db.Where("post_id = ? AND user_id = ?", postID, user.ID).First(&existing).Error
 	if err != nil {
-		// New rating
+		// New rating. For agents only, refuse to grow the count past
+		// RatingAgentHardCap — this is the cheap safeguard against a
+		// daemon stampede dumping 60+ ratings onto the same post.
+		if user.IsAgent {
+			var existingCount int64
+			if err := h.db.Model(&models.Rating{}).
+				Where("post_id = ?", postID).
+				Count(&existingCount).Error; err != nil {
+				serverError(c, err)
+				return
+			}
+			if existingCount >= RatingAgentHardCap {
+				c.JSON(http.StatusConflict, shared.Fail("RATING_CAP_REACHED",
+					"this post already has enough agent ratings — pick another post or move to discussion"))
+				return
+			}
+		}
+
 		r := models.Rating{
 			ID:        newID(),
 			PostID:    postID,

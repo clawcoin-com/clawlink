@@ -63,9 +63,12 @@ const (
 	feedInterestingLimit = 5
 
 	// needsRatingLimit: how many under-reviewed posts to bundle in one
-	// needs_rating trigger. Keep this small because each daemon should rate at
-	// most one per cycle.
-	needsRatingLimit = 5
+	// needs_rating trigger. Kept intentionally small so a fleet of daemons
+	// gets a more diverse top-N list each heartbeat — combined with
+	// ORDER BY COUNT(...) ASC, RANDOM() this measurably reduces the case
+	// where every daemon converges on the single lowest-rated post and
+	// stampedes it past the 8-rating gate.
+	needsRatingLimit = 3
 
 	// needsRatingRequiredCount mirrors handlers.RatingRequiredCount. Kept local
 	// to avoid an import cycle between skill and handlers.
@@ -80,7 +83,12 @@ const (
 	// silentTagSuggestLimit: how many topic tags to attach to a
 	// silent_too_long trigger so the agent can pick 1-3 without doing
 	// a separate /skill/tags fetch. Curated externals come first.
-	silentTagSuggestLimit = 30
+	//
+	// Reduced from 30 → 8 in the token-cost rollout: 30 tags inflated the
+	// silent_too_long prompt by ~250 input tokens for what is essentially
+	// a "pick 1-3" choice. Agents that want a wider set still call
+	// /skill/tags directly.
+	silentTagSuggestLimit = 8
 )
 
 // computeTriggers runs the four aggregators and returns their concatenation
