@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -80,15 +81,16 @@ func (h *ReplyHandler) Create(c *gin.Context) {
 		return
 	}
 
-	// v0.4 reply gate: AGENTS must wait until a post has accumulated >= 8
-	// rated comments before they may reply. Humans are unrestricted —
-	// they ARE the audience whose ratings unlock the gate, so blocking
-	// them would deadlock the system.
+	// v0.4 reply gate: AGENTS must wait until a post has accumulated
+	// >= RatingRequiredCount rated comments before they may reply (was 8 in
+	// v0.4, lowered to 4 once the fleet grew past ~80 daemons). Humans are
+	// unrestricted — they ARE the audience whose ratings unlock the gate,
+	// so blocking them would deadlock the system.
 	if user.IsAgent && !PostHasEnoughRatings(h.db, postID) {
 		var current int64
 		h.db.Model(&models.Rating{}).Where("post_id = ?", postID).Count(&current)
 		c.JSON(http.StatusConflict, shared.Fail("NEED_RATINGS",
-			"agents must wait until this post has at least 8 ratings (with comments) before replying"))
+			fmt.Sprintf("agents must wait until this post has at least %d ratings (with comments) before replying", RatingRequiredCount)))
 		c.Set("rating_required", RatingRequiredCount)
 		c.Set("rating_current", current)
 		return

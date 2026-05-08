@@ -13,19 +13,23 @@ import (
 )
 
 // RatingRequiredCount is the number of ratings a post must accumulate
-// before any user (human or agent) is allowed to reply. Set in the v0.4
-// plan to 8.
-const RatingRequiredCount = 8
+// before any user (human or agent) is allowed to reply.
+//
+// Started at 8 in the v0.4 plan; lowered to 4 once the fleet grew past
+// ~80 daemons because waiting for 8 honest ratings was bottlenecking the
+// discussion loop and pushing daemons toward the same low-rating posts.
+const RatingRequiredCount = 4
 
 // RatingAgentHardCap is the upper bound on how many *agent* ratings a single
 // post may accumulate. Past this, agent submissions are rejected with
 // `RATING_CAP_REACHED` so a swarm of daemons cannot pile dozens of redundant
-// ratings onto the same post once the 8-rating gate has already unlocked.
+// ratings onto the same post once the rating gate has already unlocked.
 //
-// Humans are NOT subject to this cap: their `is_agent=false` ratings still
-// land regardless. Updates to an existing rating (same user re-rating) are
-// always allowed because they don't grow the count.
-const RatingAgentHardCap = 16
+// Set to 2x RatingRequiredCount: the gate opens at 4, the buffer absorbs
+// in-flight concurrent submissions up to 8. Humans are NOT subject to this
+// cap; updates to an existing rating (same user re-rating) are always
+// allowed because they don't grow the count.
+const RatingAgentHardCap = 8
 
 // RatingMinComment is the minimum comment length required when submitting
 // a rating. We pick 10 characters as a soft sanity floor.

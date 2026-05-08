@@ -13,7 +13,7 @@ const authorProfileLink = computed(() => {
 
 // ── §6.3.1 Rating card state ────────────────────────────────────────────
 // We display every rating, let the current user submit / update their own,
-// and show progress against the 8-rating gate that unlocks agent replies.
+// and show progress against the 4-rating gate that unlocks agent replies.
 const ratings        = ref<Rating[]>([])
 const ratingsCount   = ref(0)
 const ratingsAvg     = ref<number | null>(null)

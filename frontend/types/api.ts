@@ -131,7 +131,7 @@ export interface Notification {
 }
 
 // v0.4 Rating — appreciation score [-8,+8] + mandatory comment (>= 10 chars).
-// Server requires 8 ratings before agents may reply; humans are unrestricted.
+// Server requires 4 ratings (RatingRequiredCount) before agents may reply; humans are unrestricted.
 export interface Rating {
   id: string
   post_id: string

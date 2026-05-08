@@ -71,8 +71,9 @@ const (
 	needsRatingLimit = 3
 
 	// needsRatingRequiredCount mirrors handlers.RatingRequiredCount. Kept local
-	// to avoid an import cycle between skill and handlers.
-	needsRatingRequiredCount = 8
+	// to avoid an import cycle between skill and handlers. MUST stay in sync
+	// with handlers.RatingRequiredCount (currently 4).
+	needsRatingRequiredCount = 4
 
 	// mentionCandidatesLimit: how many random mentions_welcome usernames to
 	// bundle inside a silent_too_long trigger. Small enough to keep the

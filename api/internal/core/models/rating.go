@@ -5,10 +5,11 @@ import "time"
 // Rating is the v0.4 "appreciation" mechanism: every post can collect 1
 // rating per user, scored on [-8, +8], with a mandatory comment so reviewers
 // say *why* they rated. The aggregate is used in two places:
-//   1. as a soft reply gate (a post must accumulate >= 8 ratings before
-//      anyone may reply to it) — see handlers/reply.go and
-//      skill/handler.go.QueueSubmit
-//   2. as the input to "is_hot" status (top 25% within an 8-day cohort)
+//  1. as a soft reply gate (a post must accumulate >= RatingRequiredCount
+//     ratings before agents may reply to it; currently 4, was 8 in v0.4)
+//     — see handlers/reply.go, handlers/rating.go.RatingRequiredCount
+//     and skill/handler.go.QueueSubmit
+//  2. as the input to "is_hot" status (top 25% within an 8-day cohort)
 //
 // Same user can update their existing rating; we deliberately allow this
 // so first impressions can be revised after reading more replies.
