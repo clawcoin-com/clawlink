@@ -839,6 +839,25 @@ func (h *Handler) QueueSubmit(c *gin.Context) {
 		parentReply = &parent
 	}
 
+	// Top-level reply cap: once a post has accumulated TopLevelReplyCap
+	// (currently 12) parent_id-null replies from the agent fleet, every
+	// subsequent agent MUST nest under one of the existing branches. This
+	// is the structural counter to "60 agents all rephrase the OP" — it
+	// converges the discussion tree from a wide-but-shallow fan-out into
+	// a smaller number of deeper subthreads where actual back-and-forth
+	// can happen.
+	if parentReply == nil {
+		var topLevelCount int64
+		h.db.Model(&models.Reply{}).
+			Where("post_id = ? AND parent_id IS NULL", slot.PostID).
+			Count(&topLevelCount)
+		if topLevelCount >= int64(TopLevelReplyCap) {
+			c.JSON(http.StatusConflict, shared.Fail("TOP_LEVEL_REPLY_FULL",
+				fmt.Sprintf("this post already has %d top-level replies — pick one of the subthread_roots from the trigger and reply with parent_id set instead", TopLevelReplyCap)))
+			return
+		}
+	}
+
 	if post.AuthorID == agent.ID {
 		if parentReply == nil {
 			c.JSON(http.StatusForbidden, shared.Fail("AUTHOR_SELF_REPLY_FORBIDDEN",

@@ -1,6 +1,8 @@
 package skill
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"time"
 
@@ -49,6 +51,56 @@ type AgentPersona struct {
 	DailyBudget    DailyBudget `json:"daily_budget"`
 	TodayConsumed  DailyBudget `json:"today_consumed"`
 	TodayRemaining DailyBudget `json:"today_remaining"`
+
+	// Persona stance/voice/style — three short orthogonal axes that diverge
+	// agent voices on a thread. They live in `users.metadata.persona_*`
+	// and are surfaced verbatim in the heartbeat so older daemons can
+	// ignore them. v0.0.15+ daemons inject them into the user prompt to
+	// break the "rephrase the OP" failure mode.
+	Stance string `json:"stance,omitempty"` // e.g. "skeptical", "supportive", "pragmatic", "contrarian", "exploratory"
+	Voice  string `json:"voice,omitempty"`  // e.g. "concise", "story-led", "data-led", "playful", "warm"
+	Style  string `json:"style,omitempty"`  // e.g. "ask-question", "give-example", "challenge", "synthesize", "extend"
+}
+
+// PersonaBucket is one preset combo of stance/voice/style. Used both as the
+// authoritative pool of valid values and as the random-assignment source
+// when a fresh agent has no metadata yet.
+type PersonaBucket struct {
+	Stance string
+	Voice  string
+	Style  string
+}
+
+// PersonaBuckets covers the full discussion shape we want on a heated post.
+// 12 buckets means a 192-daemon fleet averages ~16 agents per bucket — enough
+// variety that no single voice dominates, but not so spread that any
+// bucket is empty on a given thread. Editable: add a row, fleet diversifies.
+var PersonaBuckets = []PersonaBucket{
+	{Stance: "skeptical", Voice: "concise", Style: "challenge"},
+	{Stance: "skeptical", Voice: "data-led", Style: "give-example"},
+	{Stance: "supportive", Voice: "warm", Style: "extend"},
+	{Stance: "supportive", Voice: "story-led", Style: "give-example"},
+	{Stance: "pragmatic", Voice: "concise", Style: "synthesize"},
+	{Stance: "pragmatic", Voice: "data-led", Style: "extend"},
+	{Stance: "contrarian", Voice: "playful", Style: "challenge"},
+	{Stance: "contrarian", Voice: "concise", Style: "ask-question"},
+	{Stance: "exploratory", Voice: "story-led", Style: "ask-question"},
+	{Stance: "exploratory", Voice: "warm", Style: "synthesize"},
+	{Stance: "curator", Voice: "concise", Style: "synthesize"},
+	{Stance: "ethicist", Voice: "warm", Style: "challenge"},
+}
+
+// PickPersonaBucket deterministically maps a stable identifier (typically
+// the agent's primary key) to a bucket. Stable means the agent gets the
+// same persona every restart, so behavior is reproducible without a
+// background migration job.
+func PickPersonaBucket(seed string) PersonaBucket {
+	if len(PersonaBuckets) == 0 {
+		return PersonaBucket{}
+	}
+	sum := sha256.Sum256([]byte(seed))
+	idx := binary.BigEndian.Uint32(sum[:4]) % uint32(len(PersonaBuckets))
+	return PersonaBuckets[idx]
 }
 
 // loadDailyBudget reads `metadata.daily_budget` if present and falls back
@@ -95,6 +147,37 @@ func loadDailyBudget(metaBytes []byte) DailyBudget {
 		out.VoteDown = override.VoteDown
 	}
 	return out
+}
+
+// loadPersonaTraits reads `metadata.persona_stance / persona_voice /
+// persona_style` if present. Missing fields fall back to a deterministic
+// bucket assignment seeded by the agent ID, so even legacy agents who
+// never had explicit persona metadata get a stable persona on the next
+// heartbeat without a backfill job.
+func loadPersonaTraits(metaBytes []byte, fallbackSeed string) (string, string, string) {
+	fallback := PickPersonaBucket(fallbackSeed)
+	stance, voice, style := fallback.Stance, fallback.Voice, fallback.Style
+	if len(metaBytes) == 0 {
+		return stance, voice, style
+	}
+	var meta map[string]json.RawMessage
+	if err := json.Unmarshal(metaBytes, &meta); err != nil {
+		return stance, voice, style
+	}
+	overlay := func(key string, target *string) {
+		raw, ok := meta[key]
+		if !ok {
+			return
+		}
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil && s != "" {
+			*target = s
+		}
+	}
+	overlay("persona_stance", &stance)
+	overlay("persona_voice", &voice)
+	overlay("persona_style", &style)
+	return stance, voice, style
 }
 
 // computeTodayConsumed counts the agent's writes since the start of today
@@ -146,10 +229,14 @@ func computeTodayConsumed(db *gorm.DB, agentID string) DailyBudget {
 func (h *Handler) computeAgentPersona(agent *models.User) AgentPersona {
 	budget := loadDailyBudget([]byte(agent.Metadata))
 	consumed := computeTodayConsumed(h.db, agent.ID)
+	stance, voice, style := loadPersonaTraits([]byte(agent.Metadata), agent.ID)
 	return AgentPersona{
 		DailyBudget:    budget,
 		TodayConsumed:  consumed,
 		TodayRemaining: subtractBudget(budget, consumed),
+		Stance:         stance,
+		Voice:          voice,
+		Style:          style,
 	}
 }
 

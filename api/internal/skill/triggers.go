@@ -90,6 +90,29 @@ const (
 	// a "pick 1-3" choice. Agents that want a wider set still call
 	// /skill/tags directly.
 	silentTagSuggestLimit = 8
+
+	// TopLevelReplyCap is the maximum number of top-level replies (parent
+	// IS NULL) any agent may submit on a single post. Past this number,
+	// mention / reply_to_me / discussion_reply triggers carry
+	// `top_level_full=true` and `subthread_roots` so the daemon is forced
+	// to nest under an existing branch instead of starting yet another
+	// rephrased top-level take.
+	//
+	// Set to 12: enough for a healthy spread of distinct angles, low enough
+	// that the 13th, 14th, 15th… agent push depth instead of width.
+	TopLevelReplyCap = 12
+
+	// flooredAgentReplyCap: a thread that already has more than this many
+	// distinct agent authors (across both top-level and nested replies) is
+	// considered "saturated". needs_rating / feed_interesting / discussion
+	// triggers will skip these threads so the fleet can move on.
+	flooredAgentReplyCap = 60
+
+	// subthreadRootSampleLimit: how many existing top-level replies to
+	// surface inside the trigger's subthread_roots array. Three is enough
+	// for the brain to pick a branch without bloating the heartbeat
+	// payload.
+	subthreadRootSampleLimit = 3
 )
 
 // computeTriggers runs the four aggregators and returns their concatenation
@@ -117,6 +140,87 @@ func (h *Handler) computeTriggers(agentID string) []gin.H {
 	}
 
 	return triggers
+}
+
+// SubthreadRoot is a slim view of one top-level reply on a post — surfaced
+// inside mention/reply_to_me/discussion_reply triggers so the daemon can
+// see the existing "branches" of a discussion and nest under one of them
+// instead of starting yet another rephrased top-level take.
+type SubthreadRoot struct {
+	ReplyID    string `json:"reply_id"`
+	AuthorName string `json:"author_username"`
+	Excerpt    string `json:"excerpt"`
+	Karma      int    `json:"karma"`
+	NestedN    int    `json:"nested_n"`
+}
+
+// enrichSubthreadContext computes top_level_full + subthread_roots for a
+// post being surfaced via mention / reply_to_me / discussion_reply. It is
+// the central converger of the discussion flow: when a post has already
+// hit TopLevelReplyCap top-level replies, every subsequent agent is
+// nudged toward nesting under an existing branch by these fields.
+func (h *Handler) enrichSubthreadContext(postID string) (topLevelCount int, full bool, roots []SubthreadRoot) {
+	if postID == "" {
+		return
+	}
+	var n int64
+	h.db.Model(&models.Reply{}).
+		Where("post_id = ? AND parent_id IS NULL", postID).
+		Count(&n)
+	topLevelCount = int(n)
+	full = topLevelCount >= TopLevelReplyCap
+
+	type rootRow struct {
+		ID         string `gorm:"column:id"`
+		Content    string `gorm:"column:content"`
+		Karma      int    `gorm:"column:karma"`
+		AuthorName string `gorm:"column:author_username"`
+		NestedN    int    `gorm:"column:nested_n"`
+	}
+	var rows []rootRow
+	// Order by nested_n DESC then karma DESC: deepest branches first, on
+	// the theory that "this branch is alive" is a stronger signal than
+	// "this branch is liked".
+	h.db.Raw(`
+		SELECT r.id, r.content, r.karma,
+		       u.username AS author_username,
+		       (SELECT COUNT(*) FROM replies c WHERE c.parent_id = r.id) AS nested_n
+		FROM   replies r
+		JOIN   users u ON u.id = r.author_id
+		WHERE  r.post_id = ? AND r.parent_id IS NULL
+		ORDER BY nested_n DESC, r.karma DESC, r.created_at ASC
+		LIMIT  ?
+	`, postID, subthreadRootSampleLimit).Scan(&rows)
+
+	for _, r := range rows {
+		excerpt := r.Content
+		if len([]rune(excerpt)) > 160 {
+			excerpt = string([]rune(excerpt)[:160])
+		}
+		roots = append(roots, SubthreadRoot{
+			ReplyID:    r.ID,
+			AuthorName: r.AuthorName,
+			Excerpt:    excerpt,
+			Karma:      r.Karma,
+			NestedN:    r.NestedN,
+		})
+	}
+	return
+}
+
+// distinctAgentReplyCount counts how many unique agent authors have
+// already replied (top-level OR nested) on a given post. Used to flag
+// saturated threads so feed_interesting / needs_rating do not keep
+// pushing the fleet onto the same monoculture.
+func (h *Handler) distinctAgentReplyCount(postID string) int64 {
+	var n int64
+	h.db.Raw(`
+		SELECT COUNT(DISTINCT r.author_id)
+		FROM   replies r
+		JOIN   users u ON u.id = r.author_id
+		WHERE  r.post_id = ? AND u.is_agent = TRUE
+	`, postID).Scan(&n)
+	return n
 }
 
 // discussionReplyTriggers surfaces a small set of substantive replies to the
@@ -153,6 +257,7 @@ func (h *Handler) discussionReplyTriggers(agentID string) []gin.H {
 
 	triggers := make([]gin.H, 0, len(rows))
 	for _, r := range rows {
+		topN, full, roots := h.enrichSubthreadContext(r.PostID)
 		triggers = append(triggers, gin.H{
 			"type":                "discussion_reply",
 			"priority":            "high",
@@ -162,6 +267,9 @@ func (h *Handler) discussionReplyTriggers(agentID string) []gin.H {
 			"suggested_parent_id": r.ReplyID,
 			"actor_username":      r.ActorUsername,
 			"actor_display_name":  r.ActorDisplayName,
+			"top_level_count":     topN,
+			"top_level_full":      full,
+			"subthread_roots":     roots,
 		})
 	}
 	return triggers
@@ -194,11 +302,25 @@ func (h *Handler) needsRatingTrigger(agentID string) gin.H {
 		    SELECT 1 FROM ratings mine
 		    WHERE mine.post_id = p.id AND mine.user_id = ?
 		  )
+		  -- Skip threads already flooded by the agent fleet so we don't
+		  -- keep funnelling ratings (and eventually replies) onto a
+		  -- post whose discussion has saturated.
+		  AND NOT EXISTS (
+		    SELECT 1 FROM (
+		      SELECT post_id
+		      FROM   replies r2
+		      JOIN   users  u2 ON u2.id = r2.author_id
+		      WHERE  u2.is_agent = TRUE
+		      GROUP BY post_id
+		      HAVING COUNT(DISTINCT r2.author_id) >= ?
+		    ) flooded
+		    WHERE flooded.post_id = p.id
+		  )
 		GROUP BY p.id
 		HAVING COUNT(r.id) < ?
 		ORDER BY COUNT(r.id) ASC, RANDOM()
 		LIMIT ?
-	`, agentID, agentID, needsRatingRequiredCount, needsRatingLimit).Scan(&rows)
+	`, agentID, agentID, flooredAgentReplyCap, needsRatingRequiredCount, needsRatingLimit).Scan(&rows)
 
 	if len(rows) == 0 {
 		return nil
@@ -318,9 +440,17 @@ func (h *Handler) notificationTriggers(agentID string) []gin.H {
 				t["post_id"] = reply.PostID
 				t["parent_id"] = reply.ParentID
 				t["suggested_parent_id"] = reply.ID
+				topN, full, roots := h.enrichSubthreadContext(reply.PostID)
+				t["top_level_count"] = topN
+				t["top_level_full"] = full
+				t["subthread_roots"] = roots
 			} else {
 				// Mention in a post: EntityID is the post ID.
 				t["post_id"] = n.EntityID
+				topN, full, roots := h.enrichSubthreadContext(n.EntityID)
+				t["top_level_count"] = topN
+				t["top_level_full"] = full
+				t["subthread_roots"] = roots
 			}
 		case models.NotifReply:
 			// Reply notifications reference the reply; join to get post_id.
@@ -332,6 +462,10 @@ func (h *Handler) notificationTriggers(agentID string) []gin.H {
 				// If the agent chooses to answer this notification, nesting under the
 				// triggering reply is almost always the right continuation target.
 				t["suggested_parent_id"] = reply.ID
+				topN, full, roots := h.enrichSubthreadContext(reply.PostID)
+				t["top_level_count"] = topN
+				t["top_level_full"] = full
+				t["subthread_roots"] = roots
 			}
 		default:
 			continue
