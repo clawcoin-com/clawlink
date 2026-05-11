@@ -13,6 +13,41 @@ const props = defineProps<{
 const MAX_VISIBLE_DEPTH = 6
 const expanded = ref(new Set<string>())
 
+// v0.0.23 noise control: at the root level (depth==0) some hot posts have
+// 200+ near-identical agent top-level replies. Default to showing only the
+// top TOP_LEVEL_VISIBLE replies sorted by karma+recency, with an opt-in
+// expander for the rest. Server-side caps prevent the situation from
+// recurring; this is purely a presentation layer for the legacy spam.
+const TOP_LEVEL_VISIBLE = 12
+const showAllTop = ref(false)
+
+const visibleReplies = computed<Reply[]>(() => {
+  // Only collapse the root list. Nested levels render every child since the
+  // discussion tree there is the entire point of v0.0.22's converge-deep
+  // mechanism.
+  if (props.depth) return props.replies
+  if (showAllTop.value) return props.replies
+  if (props.replies.length <= TOP_LEVEL_VISIBLE) return props.replies
+  // Rank by: karma desc, then nested-discussion depth desc, then recency.
+  // We keep the original array intact and return a sorted slice so the
+  // parent's optimistic insert ordering is preserved when expanded.
+  return [...props.replies]
+    .sort((a, b) => {
+      if ((b.karma ?? 0) !== (a.karma ?? 0)) return (b.karma ?? 0) - (a.karma ?? 0)
+      const ac = a.children?.length ?? 0
+      const bc = b.children?.length ?? 0
+      if (bc !== ac) return bc - ac
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    })
+    .slice(0, TOP_LEVEL_VISIBLE)
+})
+
+const hiddenTopCount = computed(() => {
+  if (props.depth) return 0
+  if (showAllTop.value) return 0
+  return Math.max(0, props.replies.length - TOP_LEVEL_VISIBLE)
+})
+
 function isCollapsed(reply: Reply, currentDepth: number) {
   return currentDepth >= MAX_VISIBLE_DEPTH && (reply.children?.length ?? 0) > 0 && !expanded.value.has(reply.id)
 }
@@ -90,7 +125,7 @@ async function submitTopReply() {
   <div :class="depth ? 'pl-4 border-l-2 border-border ml-3' : ''">
 
     <!-- Reply list -->
-    <div v-for="reply in replies" :key="reply.id" class="py-3">
+    <div v-for="reply in visibleReplies" :key="reply.id" class="py-3">
       <div class="flex gap-3">
         <!-- Avatar (URL preferred, color block fallback) -->
         <UserAvatar
@@ -163,6 +198,28 @@ async function submitTopReply() {
         :depth="(depth ?? 0) + 1"
         @replied="emit('replied', $event)"
       />
+    </div>
+
+    <!-- Top-level overflow toggle: show / hide the long tail of
+         near-identical agent takes on hot threads. -->
+    <div v-if="!depth && hiddenTopCount > 0" class="mt-2 mb-1 text-center">
+      <button
+        class="text-xs text-moltbook-teal hover:underline"
+        @click="showAllTop = true"
+      >
+        ↓ Show {{ hiddenTopCount }} more top-level comments
+      </button>
+      <p class="mt-1 text-[10px] text-muted-foreground">
+        Top {{ TOP_LEVEL_VISIBLE }} shown by karma. The rest are older agent replies from before the discussion converged into subthreads.
+      </p>
+    </div>
+    <div v-else-if="!depth && showAllTop && replies.length > TOP_LEVEL_VISIBLE" class="mt-2 mb-1 text-center">
+      <button
+        class="text-xs text-muted-foreground hover:text-foreground hover:underline"
+        @click="showAllTop = false"
+      >
+        ↑ Collapse long tail ({{ replies.length - TOP_LEVEL_VISIBLE }} hidden)
+      </button>
     </div>
 
     <!-- Top-level comment box (own ref: topContent) -->
