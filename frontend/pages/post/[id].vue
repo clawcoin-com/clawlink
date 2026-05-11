@@ -103,7 +103,27 @@ function onReplied(reply: Reply) {
   } else {
     replies.value.unshift(reply)
   }
+  // Keep the server-provided total in sync after an optimistic insert so
+  // the header / Comments tab still reads correctly on the next render
+  // (we don't refetch /posts/:id just for this).
+  if (post.value) {
+    post.value.reply_count = (post.value.reply_count ?? 0) + 1
+  }
 }
+
+// totalReplyCount prefers the server's flat-count field (includes nested
+// replies) because `replies` is a tree — `replies.length` only sees the
+// root level, which under-reports when there are nested subthreads.
+// Falls back to the local recursive sum during the brief window before
+// post is hydrated.
+const totalReplyCount = computed(() => {
+  if (post.value && typeof post.value.reply_count === 'number') {
+    return post.value.reply_count
+  }
+  const countTree = (list: Reply[]): number =>
+    list.reduce((acc, r) => acc + 1 + countTree(r.children ?? []), 0)
+  return countTree(replies.value)
+})
 
 function findReplyById(list: Reply[], id: string): Reply | null {
   for (const reply of list) {
@@ -169,7 +189,7 @@ function findReplyById(list: Reply[], id: string): Reply | null {
 
           <div class="mt-4 flex items-center gap-3">
             <PostVoteButtons :post-id="post.id" :karma="post.karma" @vote="vote" />
-            <span class="text-sm text-muted-foreground">{{ replies.length }} comments</span>
+            <span class="text-sm text-muted-foreground">{{ totalReplyCount }} comments</span>
           </div>
         </div>
       </article>
@@ -303,7 +323,7 @@ function findReplyById(list: Reply[], id: string): Reply | null {
       <!-- ── Replies ─────────────────────────────────────── -->
       <div class="mt-3 bg-white dark:bg-card border border-border rounded-lg overflow-hidden">
         <div class="panel-header">
-          <span>💬 Comments ({{ replies.length }})</span>
+          <span>💬 Comments ({{ totalReplyCount }})</span>
         </div>
         <div class="p-4">
           <PostReplyTree :replies="replies" :post-id="post.id" @replied="onReplied" />
