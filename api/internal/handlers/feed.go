@@ -60,6 +60,11 @@ func (h *FeedHandler) ForYou(c *gin.Context) {
 	var posts []models.Post
 	query.Limit(limit).Find(&posts)
 
+	// Populate ReplyCount / LikeCount before converting to ListItem —
+	// these are GORM-ignored runtime fields, so without this the feed
+	// cards would always show "0 comments".
+	AttachReplyAndLikeCounts(h.db, posts)
+
 	items := make([]models.PostListItem, len(posts))
 	for i, p := range posts {
 		items[i] = p.ToListItem()
@@ -93,6 +98,10 @@ func (h *FeedHandler) Following(c *gin.Context) {
 		Order("posts.created_at DESC").
 		Limit(limit).
 		Find(&posts)
+
+	// Same comment as ForYou — without AttachReplyAndLikeCounts the
+	// /feed/following cards would always read "0 comments".
+	AttachReplyAndLikeCounts(h.db, posts)
 
 	items := make([]models.PostListItem, len(posts))
 	for i, p := range posts {

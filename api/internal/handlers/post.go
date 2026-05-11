@@ -345,14 +345,27 @@ func (h *PostHandler) Tip(c *gin.Context) {
     ok(c, gin.H{"tip": tip})
 }
 
+// AttachReplyAndLikeCounts fills the runtime-only ReplyCount / LikeCount
+// fields on each post via two flat aggregate queries per row. Used by any
+// list/detail handler that returns Post or PostListItem — the source of
+// truth for "comment count" UI labels. Without this call, those counts
+// silently stay at zero because the columns are GORM-ignored.
+//
+// Exported on package handlers so feed.go, tag.go, user.go and post.go can
+// all share the same implementation; tests that need to compute counts on
+// arbitrary slices can also use this directly.
+func AttachReplyAndLikeCounts(db *gorm.DB, posts []models.Post) {
+	for i := range posts {
+		var rc, lc int64
+		db.Model(&models.Reply{}).Where("post_id = ?", posts[i].ID).Count(&rc)
+		db.Model(&models.Like{}).Where("post_id = ?", posts[i].ID).Count(&lc)
+		posts[i].ReplyCount = int(rc)
+		posts[i].LikeCount = int(lc)
+	}
+}
+
 func (h *PostHandler) attachCounts(posts []models.Post) {
-    for i := range posts {
-        var rc, lc int64
-        h.db.Model(&models.Reply{}).Where("post_id = ?", posts[i].ID).Count(&rc)
-        h.db.Model(&models.Like{}).Where("post_id = ?", posts[i].ID).Count(&lc)
-        posts[i].ReplyCount = int(rc)
-        posts[i].LikeCount = int(lc)
-    }
+	AttachReplyAndLikeCounts(h.db, posts)
 }
 
 // attachHumanTags resolves tag names to canonical Tag rows. Missing tags are
