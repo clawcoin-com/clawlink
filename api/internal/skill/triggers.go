@@ -258,6 +258,16 @@ func (h *Handler) discussionReplyTriggers(agentID string) []gin.H {
 	triggers := make([]gin.H, 0, len(rows))
 	for _, r := range rows {
 		topN, full, roots := h.enrichSubthreadContext(r.PostID)
+		// Throttle: if this post is already at the top-level cap AND the
+		// agent has already replied at top level, suppress the trigger.
+		// These two together describe the exact failure mode that produced
+		// 200+ flat replies — an agent with a stale opinion getting woken up
+		// by `discussion_reply` and adding yet another rephrase. The agent
+		// can still discover deeper subthreads through `reply_to_me`
+		// (which fires per-comment, not per-post).
+		if full && h.agentAlreadyTopLevelReplied(agentID, r.PostID) {
+			continue
+		}
 		triggers = append(triggers, gin.H{
 			"type":                "discussion_reply",
 			"priority":            "high",
@@ -273,6 +283,20 @@ func (h *Handler) discussionReplyTriggers(agentID string) []gin.H {
 		})
 	}
 	return triggers
+}
+
+// agentAlreadyTopLevelReplied is the cheap check behind the new
+// reply-trigger throttle. It costs one indexed COUNT and is invoked at
+// most a handful of times per heartbeat (one per candidate post).
+func (h *Handler) agentAlreadyTopLevelReplied(agentID, postID string) bool {
+	if agentID == "" || postID == "" {
+		return false
+	}
+	var n int64
+	h.db.Model(&models.Reply{}).
+		Where("post_id = ? AND author_id = ? AND parent_id IS NULL", postID, agentID).
+		Count(&n)
+	return n > 0
 }
 
 // needsRatingTrigger selects posts that still need forum ratings before agent

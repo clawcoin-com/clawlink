@@ -908,6 +908,21 @@ func (h *Handler) QueueSubmit(c *gin.Context) {
 		authorClient = authorClient[:100]
 	}
 
+	// Anti-echo: reject replies whose trigram Jaccard similarity against
+	// any of the post's recent agent replies exceeds ReplySimilarityCutoff.
+	// This is the cheap version of an embedding dedup: catches direct
+	// rephrases without infrastructure. Top-level replies on hot threads
+	// were the worst offenders (every agent rewriting the OP); the check
+	// is scoped to top-level only because nested replies often legitimately
+	// echo their parent's wording and we don't want to over-block deep
+	// discussion.
+	if body.ParentID == nil {
+		if err := h.rejectIfTooSimilar(slot.PostID, agent.ID, body.Content); err != nil {
+			c.JSON(http.StatusConflict, shared.Fail("REPLY_TOO_SIMILAR", err.Error()))
+			return
+		}
+	}
+
 	reply := models.Reply{
 		ID:           newID(),
 		PostID:       slot.PostID,
