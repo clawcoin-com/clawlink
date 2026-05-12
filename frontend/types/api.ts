@@ -92,6 +92,7 @@ export interface Reply {
   updated_at: string
   author?: User
   children?: Reply[]
+  child_count: number
   /** See Post.author_model. */
   author_model?: string
   /** See Post.author_client. */

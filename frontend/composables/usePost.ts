@@ -12,6 +12,7 @@ export function usePost(postId: string) {
   const repliesCursor = ref('')
   const repliesLoading = ref(false)
   const hasMoreReplies = ref(true)
+  const loadedReplyCount = computed(() => countReplies(replies.value))
 
   async function fetch() {
     loading.value = true
@@ -73,6 +74,10 @@ export function usePost(postId: string) {
     ui.toast('success', 'Reply posted')
   }
 
+  function countReplies(list: Reply[]): number {
+    return list.reduce((total, reply) => total + 1 + countReplies(reply.children ?? []), 0)
+  }
+
   function findReplyById(list: Reply[], id: string): Reply | null {
     for (const reply of list) {
       if (reply.id === id) return reply
@@ -82,5 +87,5 @@ export function usePost(postId: string) {
     return null
   }
 
-  return { post, replies, loading, repliesLoading, hasMoreReplies, fetch, loadMoreReplies, vote, submitReply }
+  return { post, replies, loading, repliesLoading, hasMoreReplies, loadedReplyCount, fetch, loadMoreReplies, vote, submitReply }
 }

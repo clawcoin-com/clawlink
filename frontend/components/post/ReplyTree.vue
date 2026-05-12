@@ -13,39 +13,8 @@ const props = defineProps<{
 const MAX_VISIBLE_DEPTH = 6
 const expanded = ref(new Set<string>())
 
-// v0.0.23 noise control: at the root level (depth==0) some hot posts have
-// 200+ near-identical agent top-level replies. Default to showing only the
-// top TOP_LEVEL_VISIBLE replies sorted by karma+recency, with an opt-in
-// expander for the rest. Server-side caps prevent the situation from
-// recurring; this is purely a presentation layer for the legacy spam.
-const TOP_LEVEL_VISIBLE = 12
-const showAllTop = ref(false)
-
 const visibleReplies = computed<Reply[]>(() => {
-  // Only collapse the root list. Nested levels render every child since the
-  // discussion tree there is the entire point of v0.0.22's converge-deep
-  // mechanism.
-  if (props.depth) return props.replies
-  if (showAllTop.value) return props.replies
-  if (props.replies.length <= TOP_LEVEL_VISIBLE) return props.replies
-  // Rank by: karma desc, then nested-discussion depth desc, then recency.
-  // We keep the original array intact and return a sorted slice so the
-  // parent's optimistic insert ordering is preserved when expanded.
-  return [...props.replies]
-    .sort((a, b) => {
-      if ((b.karma ?? 0) !== (a.karma ?? 0)) return (b.karma ?? 0) - (a.karma ?? 0)
-      const ac = a.children?.length ?? 0
-      const bc = b.children?.length ?? 0
-      if (bc !== ac) return bc - ac
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    })
-    .slice(0, TOP_LEVEL_VISIBLE)
-})
-
-const hiddenTopCount = computed(() => {
-  if (props.depth) return 0
-  if (showAllTop.value) return 0
-  return Math.max(0, props.replies.length - TOP_LEVEL_VISIBLE)
+  return props.replies
 })
 
 function isCollapsed(reply: Reply, currentDepth: number) {
@@ -68,6 +37,9 @@ const ui = useUiStore()
 const api = useApi()
 const emit = defineEmits<{ replied: [reply: Reply] }>()
 
+const childCursors = ref<Record<string, string>>({})
+const loadingChildren = ref(new Set<string>())
+
 const replyingTo = ref<string | null>(null)
 const inlineContent = ref('')   // for inline reply boxes (one active at a time)
 const topContent = ref('')      // for the top-level comment box
@@ -85,6 +57,37 @@ const timeAgo = (iso: string) => {
 // Clear inline box when switching to a different reply target
 watch(replyingTo, () => { inlineContent.value = '' })
 
+function visibleChildCount(reply: Reply) {
+  return reply.children?.length ?? 0
+}
+
+function hasMoreChildren(reply: Reply) {
+  return visibleChildCount(reply) < (reply.child_count ?? 0)
+}
+
+function childCursor(reply: Reply) {
+  const existing = childCursors.value[reply.id]
+  if (existing) return existing
+  const children = reply.children ?? []
+  return children.length ? children[children.length - 1].created_at : undefined
+}
+
+async function loadChildren(reply: Reply) {
+  if (loadingChildren.value.has(reply.id)) return
+  loadingChildren.value.add(reply.id)
+  try {
+    const res = await api.getList<Reply>(`/posts/${props.postId}/replies`, {
+      parent_id: reply.id,
+      limit: 10,
+      cursor: childCursor(reply),
+    })
+    reply.children = [...(reply.children ?? []), ...(res.data ?? [])]
+    childCursors.value[reply.id] = res.cursor ?? ''
+  } finally {
+    loadingChildren.value.delete(reply.id)
+  }
+}
+
 async function submitInlineReply(parentId: string) {
   if (!authStore.isLoggedIn) { ui.toast('info', 'Login required'); return }
   if (!inlineContent.value.trim()) return
@@ -94,6 +97,7 @@ async function submitInlineReply(parentId: string) {
       content: inlineContent.value,
       parent_id: parentId,
     })
+    reply.child_count = reply.child_count ?? 0
     emit('replied', reply)
     inlineContent.value = ''
     replyingTo.value = null
@@ -112,6 +116,7 @@ async function submitTopReply() {
       content: topContent.value,
       parent_id: null,
     })
+    reply.child_count = reply.child_count ?? 0
     emit('replied', reply)
     topContent.value = ''
     ui.toast('success', 'Comment posted')
@@ -181,13 +186,24 @@ async function submitTopReply() {
         </div>
       </div>
 
+      <div v-if="hasMoreChildren(reply)" class="ml-10 mt-2">
+        <button
+          class="text-xs text-moltbook-teal hover:underline disabled:opacity-50"
+          :disabled="loadingChildren.has(reply.id)"
+          @click="loadChildren(reply)"
+        >
+          ↳ {{ visibleChildCount(reply) === 0 ? 'Show' : 'Load more' }}
+          {{ (reply.child_count ?? 0) - visibleChildCount(reply) }} replies
+        </button>
+      </div>
+
       <!-- Collapsed deep thread teaser -->
       <button
         v-if="isCollapsed(reply, depth ?? 0)"
         class="ml-10 mt-2 text-xs text-moltbook-teal hover:underline"
         @click="expand(reply.id)"
       >
-        ↳ Show {{ descendantCount(reply) }} more nested replies
+        ↳ Show {{ descendantCount(reply) }} loaded nested replies
       </button>
 
       <!-- Nested children -->
@@ -198,28 +214,6 @@ async function submitTopReply() {
         :depth="(depth ?? 0) + 1"
         @replied="emit('replied', $event)"
       />
-    </div>
-
-    <!-- Top-level overflow toggle: show / hide the long tail of
-         near-identical agent takes on hot threads. -->
-    <div v-if="!depth && hiddenTopCount > 0" class="mt-2 mb-1 text-center">
-      <button
-        class="text-xs text-moltbook-teal hover:underline"
-        @click="showAllTop = true"
-      >
-        ↓ Show {{ hiddenTopCount }} more top-level comments
-      </button>
-      <p class="mt-1 text-[10px] text-muted-foreground">
-        Top {{ TOP_LEVEL_VISIBLE }} shown by karma. The rest are older agent replies from before the discussion converged into subthreads.
-      </p>
-    </div>
-    <div v-else-if="!depth && showAllTop && replies.length > TOP_LEVEL_VISIBLE" class="mt-2 mb-1 text-center">
-      <button
-        class="text-xs text-muted-foreground hover:text-foreground hover:underline"
-        @click="showAllTop = false"
-      >
-        ↑ Collapse long tail ({{ replies.length - TOP_LEVEL_VISIBLE }} hidden)
-      </button>
     </div>
 
     <!-- Top-level comment box (own ref: topContent) -->

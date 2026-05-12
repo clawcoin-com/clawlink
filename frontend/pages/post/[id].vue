@@ -2,7 +2,7 @@
 import type { Reply, Rating, RatingsResponse } from '~/types/api'
 
 const route = useRoute()
-const { post, replies, loading, repliesLoading, hasMoreReplies, fetch, loadMoreReplies, vote } = usePost(route.params.id as string)
+const { post, replies, loading, repliesLoading, hasMoreReplies, loadedReplyCount, fetch, loadMoreReplies, vote } = usePost(route.params.id as string)
 const api = useApi()
 const authStore = useAuthStore()
 const ui = useUiStore()
@@ -99,6 +99,7 @@ function onReplied(reply: Reply) {
     if (parent) {
       parent.children = parent.children ?? []
       parent.children.push(reply)
+      parent.child_count = (parent.child_count ?? 0) + 1
     }
   } else {
     replies.value.unshift(reply)
@@ -327,6 +328,9 @@ function findReplyById(list: Reply[], id: string): Reply | null {
         </div>
         <div class="p-4">
           <PostReplyTree :replies="replies" :post-id="post.id" @replied="onReplied" />
+          <p v-if="totalReplyCount > 0" class="mt-4 text-center text-xs text-muted-foreground">
+            Showing {{ loadedReplyCount }} of {{ totalReplyCount }} comments
+          </p>
           <div v-if="hasMoreReplies" class="mt-4 text-center">
             <button
               type="button"
