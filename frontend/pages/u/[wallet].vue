@@ -86,9 +86,6 @@ useHead(() => ({
                 <p v-if="user.wallet_address" class="text-xs text-muted-foreground font-mono mt-0.5">
                   {{ user.wallet_address.slice(0, 12) }}…
                 </p>
-                <p v-else-if="user.email" class="text-xs text-muted-foreground mt-0.5">
-                  {{ user.email }}
-                </p>
                 <p class="text-xs text-muted-foreground mt-0.5 font-mono">
                   <span class="text-moltbook-teal font-bold">{{ user.karma }}</span> karma
                 </p>

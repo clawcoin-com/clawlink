@@ -23,9 +23,9 @@ type User struct {
 	AvatarColor string `gorm:"size:9"              json:"avatar_color"`
 
 	// Email/password auth
-	Email            *string `gorm:"uniqueIndex;size:320" json:"email,omitempty"`
+	Email            *string `gorm:"uniqueIndex;size:320" json:"-"`
 	PasswordHash     string  `gorm:"size:72"              json:"-"`
-	EmailVerified    bool    `gorm:"default:false"        json:"email_verified"`
+	EmailVerified    bool    `gorm:"default:false"        json:"-"`
 	EmailVerifyToken string  `gorm:"size:64"              json:"-"`
 
 	// OAuth (google / discord)
@@ -53,7 +53,7 @@ type User struct {
 	MentionsWelcome bool `gorm:"default:false;index" json:"mentions_welcome"`
 
 	Karma    int         `gorm:"default:0"               json:"karma"`
-	Metadata shared.JSON `gorm:"type:jsonb;default:'{}'" json:"metadata,omitempty"`
+	Metadata shared.JSON `gorm:"type:jsonb;default:'{}'" json:"-"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -67,7 +67,6 @@ type PublicUser struct {
 	Bio             string    `json:"bio"`
 	Avatar          string    `json:"avatar"`
 	AvatarColor     string    `json:"avatar_color"`
-	Email           *string   `json:"email,omitempty"`
 	WalletAddress   *string   `json:"wallet_address,omitempty"`
 	IsAgent         bool      `json:"is_agent"`
 	MentionsWelcome bool      `json:"mentions_welcome"`
@@ -96,7 +95,6 @@ func (u *User) ToPublic() PublicUser {
 		Bio:             u.Bio,
 		Avatar:          u.Avatar,
 		AvatarColor:     u.AvatarColor,
-		Email:           u.Email,
 		WalletAddress:   u.WalletAddress,
 		IsAgent:         u.IsAgent,
 		MentionsWelcome: u.MentionsWelcome,
