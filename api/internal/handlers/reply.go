@@ -17,6 +17,8 @@ type ReplyHandler struct {
 	db *gorm.DB
 }
 
+const replyPreviewChildLimit = 3
+
 func NewReplyHandler(db *gorm.DB) *ReplyHandler {
 	return &ReplyHandler{db: db}
 }
@@ -25,98 +27,77 @@ func NewReplyHandler(db *gorm.DB) *ReplyHandler {
 // GET /api/v1/posts/:id/replies
 func (h *ReplyHandler) ListByPost(c *gin.Context) {
 	postID := c.Param("id")
+	parentID := c.Query("parent_id")
 	var post models.Post
 	if err := h.db.First(&post, "id = ?", postID).Error; err != nil {
 		notFound(c, "post not found")
 		return
 	}
+	if parentID != "" {
+		var parent models.Reply
+		if err := h.db.First(&parent, "id = ? AND post_id = ?", parentID, postID).Error; err != nil {
+			badRequest(c, "parent reply not found in this post")
+			return
+		}
+	}
 
 	limit, cursor := paginationParams(c)
 
-	var rootReplies []models.Reply
-	h.db.Preload("Author").
-		Where("post_id = ? AND parent_id IS NULL AND created_at < ?", postID, cursor).
+	query := h.db.Preload("Author").
+		Where("post_id = ? AND created_at < ?", postID, cursor)
+	countQuery := h.db.Model(&models.Reply{}).Where("post_id = ?", postID)
+	if parentID == "" {
+		query = query.Where("parent_id IS NULL")
+		countQuery = countQuery.Where("parent_id IS NULL")
+	} else {
+		query = query.Where("parent_id = ?", parentID)
+		countQuery = countQuery.Where("parent_id = ?", parentID)
+	}
+
+	var replies []models.Reply
+	query.
 		Order("created_at DESC").
 		Limit(limit).
-		Find(&rootReplies)
+		Find(&replies)
 
-	rootIDs := make([]string, 0, len(rootReplies))
-	for i := range rootReplies {
-		rootIDs = append(rootIDs, rootReplies[i].ID)
-	}
-
-	allReplies := make([]models.Reply, 0, len(rootReplies))
-	allReplies = append(allReplies, rootReplies...)
-	if len(rootIDs) > 0 {
-		var nestedReplies []models.Reply
-		h.db.Preload("Author").
-			Where("post_id = ? AND parent_id IS NOT NULL", postID).
-			Order("created_at ASC").
-			Find(&nestedReplies)
-
-		allowed := make(map[string]struct{}, len(rootIDs))
-		for _, id := range rootIDs {
-			allowed[id] = struct{}{}
-		}
-		for {
-			added := false
-			for i := range nestedReplies {
-				if nestedReplies[i].ParentID == nil {
-					continue
-				}
-				if _, ok := allowed[*nestedReplies[i].ParentID]; !ok {
-					continue
-				}
-				if _, seen := allowed[nestedReplies[i].ID]; seen {
-					continue
-				}
-				allowed[nestedReplies[i].ID] = struct{}{}
-				allReplies = append(allReplies, nestedReplies[i])
-				added = true
-			}
-			if !added {
-				break
-			}
-		}
-	}
-
-	// Build tree in two passes to avoid value-copy-before-children bug.
-	// Single-pass fails: roots = append(roots, *r) copies the Reply value BEFORE
-	// children are attached via the index pointer, so children are always lost.
-
-	// Pass 1: build index and attach children to parents via pointer.
-	index := make(map[string]*models.Reply, len(allReplies))
-	for i := range allReplies {
-		index[allReplies[i].ID] = &allReplies[i]
-	}
-	for i := range allReplies {
-		if allReplies[i].ParentID != nil {
-			if parent, ok := index[*allReplies[i].ParentID]; ok {
-				parent.Children = append(parent.Children, allReplies[i])
-			}
-		}
-	}
-
-	// Pass 2: collect roots — Children slices are now fully populated.
-	roots := make([]models.Reply, 0)
-	for i := range allReplies {
-		if allReplies[i].ParentID == nil {
-			roots = append(roots, allReplies[i])
-			continue
-		}
-		if _, ok := index[*allReplies[i].ParentID]; !ok {
-			roots = append(roots, allReplies[i])
-		}
-	}
+	h.attachReplyChildPreviews(postID, replies)
 
 	var total int64
-	h.db.Model(&models.Reply{}).Where("post_id = ? AND parent_id IS NULL", postID).Count(&total)
+	countQuery.Count(&total)
 
 	var nextCursor string
-	if len(rootReplies) == limit {
-		nextCursor = rootReplies[len(rootReplies)-1].CreatedAt.Format(time.RFC3339Nano)
+	if len(replies) == limit {
+		nextCursor = replies[len(replies)-1].CreatedAt.Format(time.RFC3339Nano)
 	}
-	okList(c, roots, total, nextCursor)
+	okList(c, replies, total, nextCursor)
+}
+
+func (h *ReplyHandler) attachReplyChildPreviews(postID string, replies []models.Reply) {
+	for i := range replies {
+		var childCount int64
+		h.db.Model(&models.Reply{}).Where("post_id = ? AND parent_id = ?", postID, replies[i].ID).Count(&childCount)
+		replies[i].ChildCount = int(childCount)
+		if childCount == 0 {
+			continue
+		}
+
+		var preview []models.Reply
+		h.db.Preload("Author").
+			Where("post_id = ? AND parent_id = ?", postID, replies[i].ID).
+			Order("created_at DESC").
+			Limit(replyPreviewChildLimit).
+			Find(&preview)
+		h.attachReplyChildCounts(postID, preview)
+		replies[i].Children = preview
+	}
+}
+
+func (h *ReplyHandler) attachReplyChildCounts(postID string, replies []models.Reply) {
+	for i := range replies {
+		var childCount int64
+		h.db.Model(&models.Reply{}).Where("post_id = ? AND parent_id = ?", postID, replies[i].ID).Count(&childCount)
+		replies[i].ChildCount = int(childCount)
+	}
 }
 
 // Create posts a new reply to a post (or nested under another reply).
