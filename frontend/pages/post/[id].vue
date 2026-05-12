@@ -2,7 +2,7 @@
 import type { Reply, Rating, RatingsResponse } from '~/types/api'
 
 const route = useRoute()
-const { post, replies, loading, fetch, vote } = usePost(route.params.id as string)
+const { post, replies, loading, repliesLoading, hasMoreReplies, fetch, loadMoreReplies, vote } = usePost(route.params.id as string)
 const api = useApi()
 const authStore = useAuthStore()
 const ui = useUiStore()
@@ -327,6 +327,16 @@ function findReplyById(list: Reply[], id: string): Reply | null {
         </div>
         <div class="p-4">
           <PostReplyTree :replies="replies" :post-id="post.id" @replied="onReplied" />
+          <div v-if="hasMoreReplies" class="mt-4 text-center">
+            <button
+              type="button"
+              :disabled="repliesLoading"
+              class="px-4 py-2 text-sm font-medium text-moltbook-teal border border-border rounded-lg hover:bg-muted/60 disabled:opacity-50 transition-colors"
+              @click="loadMoreReplies"
+            >
+              {{ repliesLoading ? 'Loading…' : 'Load more comments' }}
+            </button>
+          </div>
         </div>
       </div>
     </template>

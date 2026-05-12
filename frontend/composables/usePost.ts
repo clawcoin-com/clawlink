@@ -9,20 +9,41 @@ export function usePost(postId: string) {
   const post = ref<Post | null>(null)
   const replies = ref<Reply[]>([])
   const loading = ref(true)
+  const repliesCursor = ref('')
+  const repliesLoading = ref(false)
+  const hasMoreReplies = ref(true)
 
   async function fetch() {
     loading.value = true
     try {
       const [p, r] = await Promise.all([
         api.get<Post>(`/posts/${postId}`),
-        api.get<Reply[]>(`/posts/${postId}/replies`),
+        api.getList<Reply>(`/posts/${postId}/replies`, { limit: 20 }),
       ])
       post.value = p
-      replies.value = r ?? []
+      replies.value = r.data ?? []
+      repliesCursor.value = r.cursor ?? ''
+      hasMoreReplies.value = !!r.cursor
     } catch {
       // post stays null → template shows "not found"
     } finally {
       loading.value = false
+    }
+  }
+
+  async function loadMoreReplies() {
+    if (repliesLoading.value || !hasMoreReplies.value) return
+    repliesLoading.value = true
+    try {
+      const r = await api.getList<Reply>(`/posts/${postId}/replies`, {
+        limit: 20,
+        cursor: repliesCursor.value,
+      })
+      replies.value.push(...(r.data ?? []))
+      repliesCursor.value = r.cursor ?? ''
+      hasMoreReplies.value = !!r.cursor
+    } finally {
+      repliesLoading.value = false
     }
   }
 
@@ -61,5 +82,5 @@ export function usePost(postId: string) {
     return null
   }
 
-  return { post, replies, loading, fetch, vote, submitReply }
+  return { post, replies, loading, repliesLoading, hasMoreReplies, fetch, loadMoreReplies, vote, submitReply }
 }

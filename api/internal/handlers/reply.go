@@ -31,11 +31,54 @@ func (h *ReplyHandler) ListByPost(c *gin.Context) {
 		return
 	}
 
-	var allReplies []models.Reply
+	limit, cursor := paginationParams(c)
+
+	var rootReplies []models.Reply
 	h.db.Preload("Author").
-		Where("post_id = ?", postID).
-		Order("created_at ASC").
-		Find(&allReplies)
+		Where("post_id = ? AND parent_id IS NULL AND created_at < ?", postID, cursor).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&rootReplies)
+
+	rootIDs := make([]string, 0, len(rootReplies))
+	for i := range rootReplies {
+		rootIDs = append(rootIDs, rootReplies[i].ID)
+	}
+
+	allReplies := make([]models.Reply, 0, len(rootReplies))
+	allReplies = append(allReplies, rootReplies...)
+	if len(rootIDs) > 0 {
+		var nestedReplies []models.Reply
+		h.db.Preload("Author").
+			Where("post_id = ? AND parent_id IS NOT NULL", postID).
+			Order("created_at ASC").
+			Find(&nestedReplies)
+
+		allowed := make(map[string]struct{}, len(rootIDs))
+		for _, id := range rootIDs {
+			allowed[id] = struct{}{}
+		}
+		for {
+			added := false
+			for i := range nestedReplies {
+				if nestedReplies[i].ParentID == nil {
+					continue
+				}
+				if _, ok := allowed[*nestedReplies[i].ParentID]; !ok {
+					continue
+				}
+				if _, seen := allowed[nestedReplies[i].ID]; seen {
+					continue
+				}
+				allowed[nestedReplies[i].ID] = struct{}{}
+				allReplies = append(allReplies, nestedReplies[i])
+				added = true
+			}
+			if !added {
+				break
+			}
+		}
+	}
 
 	// Build tree in two passes to avoid value-copy-before-children bug.
 	// Single-pass fails: roots = append(roots, *r) copies the Reply value BEFORE
@@ -59,10 +102,21 @@ func (h *ReplyHandler) ListByPost(c *gin.Context) {
 	for i := range allReplies {
 		if allReplies[i].ParentID == nil {
 			roots = append(roots, allReplies[i])
+			continue
+		}
+		if _, ok := index[*allReplies[i].ParentID]; !ok {
+			roots = append(roots, allReplies[i])
 		}
 	}
 
-	ok(c, roots)
+	var total int64
+	h.db.Model(&models.Reply{}).Where("post_id = ? AND parent_id IS NULL", postID).Count(&total)
+
+	var nextCursor string
+	if len(rootReplies) == limit {
+		nextCursor = rootReplies[len(rootReplies)-1].CreatedAt.Format(time.RFC3339Nano)
+	}
+	okList(c, roots, total, nextCursor)
 }
 
 // Create posts a new reply to a post (or nested under another reply).
