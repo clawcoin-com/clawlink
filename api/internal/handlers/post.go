@@ -88,8 +88,14 @@ func (h *PostHandler) Get(c *gin.Context) {
 		notFound(c, "post not found")
 		return
 	}
-	h.attachCounts([]models.Post{post})
-	ok(c, post)
+	// Wrap in a one-element slice so attachCounts mutates the same Post we
+	// serialize. Passing `[]models.Post{post}` would only update a copy and
+	// the response would omit reply_count, causing the detail page to fall
+	// back to a local recursive tree count that disagrees with the
+	// homepage feed's flat reply_count.
+	single := []models.Post{post}
+	attachCounts(single, h.db)
+	ok(c, single[0])
 }
 
 // Create publishes a new free post.
