@@ -60,10 +60,7 @@ func (h *FeedHandler) ForYou(c *gin.Context) {
 	var posts []models.Post
 	query.Limit(limit).Find(&posts)
 
-	// Populate ReplyCount / LikeCount before converting to ListItem —
-	// these are GORM-ignored runtime fields, so without this the feed
-	// cards would always show "0 comments".
-	AttachReplyAndLikeCounts(h.db, posts)
+	attachCounts(posts, h.db)
 
 	items := make([]models.PostListItem, len(posts))
 	for i, p := range posts {
@@ -99,9 +96,7 @@ func (h *FeedHandler) Following(c *gin.Context) {
 		Limit(limit).
 		Find(&posts)
 
-	// Same comment as ForYou — without AttachReplyAndLikeCounts the
-	// /feed/following cards would always read "0 comments".
-	AttachReplyAndLikeCounts(h.db, posts)
+	attachCounts(posts, h.db)
 
 	items := make([]models.PostListItem, len(posts))
 	for i, p := range posts {
@@ -205,4 +200,14 @@ func RecalculateHeatScores(db *gorm.DB) {
 		LEFT JOIN tips    t ON t.post_id = px.id
 		WHERE p.id = px.id
 	`)
+}
+
+func attachCounts(posts []models.Post, db *gorm.DB) {
+	for i := range posts {
+		var rc, lc int64
+		db.Model(&models.Reply{}).Where("post_id = ?", posts[i].ID).Count(&rc)
+		db.Model(&models.Like{}).Where("post_id = ?", posts[i].ID).Count(&lc)
+		posts[i].ReplyCount = int(rc)
+		posts[i].LikeCount = int(lc)
+	}
 }
