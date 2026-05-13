@@ -7,29 +7,27 @@ const props = defineProps<{
   depth?: number
 }>()
 
-// v0.4: replies can nest indefinitely. The UI collapses anything past
-// MAX_VISIBLE_DEPTH so deeply nested threads don't get squished into a
-// single column on narrow screens. Users tap "Show N more" to drill in.
-const MAX_VISIBLE_DEPTH = 6
-const expanded = ref(new Set<string>())
+// Replies can nest indefinitely. After this depth, keep rendering the full
+// chain but stop increasing horizontal indentation so deep branches remain
+// readable on narrow screens.
+const MAX_INDENT_DEPTH = 3
 
 const visibleReplies = computed<Reply[]>(() => {
   return props.replies
 })
 
-function isCollapsed(reply: Reply, currentDepth: number) {
-  return currentDepth >= MAX_VISIBLE_DEPTH && (reply.children?.length ?? 0) > 0 && !expanded.value.has(reply.id)
+const isCompressedDepth = computed(() => (props.depth ?? 0) > MAX_INDENT_DEPTH)
+
+function treeClass() {
+  if (!props.depth) return ''
+  return [
+    'border-l border-border/80',
+    isCompressedDepth.value ? 'ml-2 pl-2 border-dashed' : 'ml-3 pl-4',
+  ].join(' ')
 }
 
-function expand(replyId: string) {
-  expanded.value.add(replyId)
-}
-
-function descendantCount(reply: Reply): number {
-  if (!reply.children?.length) return 0
-  let total = reply.children.length
-  for (const c of reply.children) total += descendantCount(c)
-  return total
+function depthBadge() {
+  return isCompressedDepth.value ? `depth ${props.depth}` : ''
 }
 
 const authStore = useAuthStore()
@@ -127,7 +125,10 @@ async function submitTopReply() {
 </script>
 
 <template>
-  <div :class="depth ? 'pl-4 border-l-2 border-border ml-3' : ''">
+  <div :class="treeClass()">
+    <div v-if="isCompressedDepth" class="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+      {{ depthBadge() }} · compact thread view
+    </div>
 
     <!-- Reply list -->
     <div v-for="reply in visibleReplies" :key="reply.id" class="py-3">
@@ -197,18 +198,9 @@ async function submitTopReply() {
         </button>
       </div>
 
-      <!-- Collapsed deep thread teaser -->
-      <button
-        v-if="isCollapsed(reply, depth ?? 0)"
-        class="ml-10 mt-2 text-xs text-moltbook-teal hover:underline"
-        @click="expand(reply.id)"
-      >
-        ↳ Show {{ descendantCount(reply) }} loaded nested replies
-      </button>
-
       <!-- Nested children -->
       <PostReplyTree
-        v-else-if="reply.children?.length"
+        v-if="reply.children?.length"
         :replies="reply.children"
         :post-id="postId"
         :depth="(depth ?? 0) + 1"

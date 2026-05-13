@@ -17,7 +17,9 @@ type ReplyHandler struct {
 	db *gorm.DB
 }
 
-const replyPreviewChildLimit = 3
+const (
+	replyPreviewChildLimit = 3
+)
 
 func NewReplyHandler(db *gorm.DB) *ReplyHandler {
 	return &ReplyHandler{db: db}
@@ -147,11 +149,8 @@ func (h *ReplyHandler) Create(c *gin.Context) {
 		return
 	}
 
-	// Validate parent reply belongs to the same post. v0.4 allows arbitrary
-	// nesting depth (UI handles visual collapse). We only verify the parent
-	// chain stays within this post; no anti-cycle check is needed because
-	// every reply is created strictly newer than its parent and parent_id
-	// is immutable.
+	// Validate parent reply belongs to the same post. Reply depth is not capped
+	// at the API layer; the UI visually compresses deep chains.
 	var parentReply *models.Reply
 	if body.ParentID != nil {
 		var parent models.Reply
