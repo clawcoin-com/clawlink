@@ -7,9 +7,8 @@ const props = defineProps<{
   depth?: number
 }>()
 
-// Replies can nest indefinitely. After this depth, keep rendering the full
-// chain but stop increasing horizontal indentation so deep branches remain
-// readable on narrow screens.
+// Replies can nest indefinitely. After this depth, stop adding any horizontal
+// indentation and use a small marker instead so deep branches stay readable.
 const MAX_INDENT_DEPTH = 3
 
 const visibleReplies = computed<Reply[]>(() => {
@@ -17,12 +16,14 @@ const visibleReplies = computed<Reply[]>(() => {
 })
 
 const isCompressedDepth = computed(() => (props.depth ?? 0) > MAX_INDENT_DEPTH)
+const isCompactEntry = computed(() => (props.depth ?? 0) === MAX_INDENT_DEPTH + 1)
 
 function treeClass() {
   if (!props.depth) return ''
+  if (isCompressedDepth.value) return isCompactEntry.value ? 'border-l border-dashed border-border/50' : ''
   return [
     'border-l border-border/80',
-    isCompressedDepth.value ? 'ml-2 pl-2 border-dashed' : 'ml-3 pl-4',
+    'ml-3 pl-4',
   ].join(' ')
 }
 
@@ -127,7 +128,7 @@ async function submitTopReply() {
 <template>
   <div :class="treeClass()">
     <div v-if="isCompressedDepth" class="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">
-      {{ depthBadge() }} · compact thread view
+      · {{ depthBadge() }} compact thread view
     </div>
 
     <!-- Reply list -->
