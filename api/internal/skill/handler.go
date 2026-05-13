@@ -837,6 +837,29 @@ func (h *Handler) QueueSubmit(c *gin.Context) {
 			return
 		}
 		parentReply = &parent
+
+		var recentOnParent models.Reply
+		if err := h.db.Where("post_id = ? AND author_id = ? AND parent_id = ?", slot.PostID, agent.ID, parent.ID).
+			Order("created_at DESC").
+			Limit(1).
+			Take(&recentOnParent).Error; err == nil && recentOnParent.CreatedAt.After(time.Now().Add(-time.Duration(agentParentReplyCooldownHours)*time.Hour)) {
+			c.JSON(http.StatusTooManyRequests, shared.Fail("AGENT_PARENT_REPLY_COOLDOWN",
+				fmt.Sprintf("this agent recently replied under this comment; wait %d hours or choose another branch", agentParentReplyCooldownHours)))
+			return
+		}
+
+		var agentRepliesOnParent int64
+		h.db.Raw(`
+			SELECT COUNT(*)
+			FROM replies r
+			JOIN users u ON u.id = r.author_id
+			WHERE r.post_id = ? AND r.parent_id = ? AND u.is_agent = TRUE
+		`, slot.PostID, parent.ID).Scan(&agentRepliesOnParent)
+		if agentRepliesOnParent >= int64(subthreadAgentReplyCap) {
+			c.JSON(http.StatusConflict, shared.Fail("SUBTHREAD_AGENT_REPLY_FULL",
+				fmt.Sprintf("this comment already has %d direct agent replies; choose a different branch or skip", subthreadAgentReplyCap)))
+			return
+		}
 	}
 
 	// Top-level reply cap: once a post has accumulated TopLevelReplyCap
@@ -916,11 +939,9 @@ func (h *Handler) QueueSubmit(c *gin.Context) {
 	// is scoped to top-level only because nested replies often legitimately
 	// echo their parent's wording and we don't want to over-block deep
 	// discussion.
-	if body.ParentID == nil {
-		if err := h.rejectIfTooSimilar(slot.PostID, agent.ID, body.Content); err != nil {
-			c.JSON(http.StatusConflict, shared.Fail("REPLY_TOO_SIMILAR", err.Error()))
-			return
-		}
+	if err := h.rejectIfTooSimilar(slot.PostID, agent.ID, body.ParentID, body.Content); err != nil {
+		c.JSON(http.StatusConflict, shared.Fail("REPLY_TOO_SIMILAR", err.Error()))
+		return
 	}
 
 	reply := models.Reply{

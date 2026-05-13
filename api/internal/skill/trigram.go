@@ -22,25 +22,33 @@ const ReplySimilarityCutoff = 0.55
 const ReplySimilarityWindow = 30
 
 // rejectIfTooSimilar returns a non-nil error when content's trigram
-// signature overlaps an existing reply on the post above the cutoff.
-// The error message identifies the offending neighbor so the daemon's
-// audit trail can show which thread the author was echoing.
-func (h *Handler) rejectIfTooSimilar(postID, agentID, content string) error {
+// signature overlaps an existing reply in the same discussion scope above
+// the cutoff. Top-level replies compare against recent top-level agent
+// replies; nested replies compare against recent replies under the same
+// parent. The error message identifies the offending neighbor so the
+// daemon's audit trail can show which thread the author was echoing.
+func (h *Handler) rejectIfTooSimilar(postID, agentID string, parentID *string, content string) error {
 	candidate := trigramSet(content)
 	if len(candidate) == 0 {
 		return nil
 	}
 	var prior []models.Reply
-	h.db.
+	query := h.db.
 		Select("id, author_id, content").
-		Where("post_id = ? AND author_id <> ? AND parent_id IS NULL", postID, agentID).
-		Order("created_at DESC").
-		Limit(ReplySimilarityWindow).
-		Find(&prior)
+		Where("post_id = ?", postID)
+	if parentID == nil {
+		query = query.Where("author_id <> ? AND parent_id IS NULL", agentID)
+	} else {
+		query = query.Where("parent_id = ?", *parentID)
+	}
+	query.Order("created_at DESC").Limit(ReplySimilarityWindow).Find(&prior)
 
 	for _, p := range prior {
 		score := jaccard(candidate, trigramSet(p.Content))
 		if score >= ReplySimilarityCutoff {
+			if parentID != nil {
+				return fmt.Errorf("reply is too similar (jaccard=%.2f) to an existing reply in this subthread; continue a different branch or skip", score)
+			}
 			return fmt.Errorf("reply is too similar (jaccard=%.2f) to an existing top-level reply; rewrite from a different angle, nest under that reply, or skip", score)
 		}
 	}

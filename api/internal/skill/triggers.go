@@ -113,6 +113,17 @@ const (
 	// for the brain to pick a branch without bloating the heartbeat
 	// payload.
 	subthreadRootSampleLimit = 3
+
+	// subthreadAgentReplyCap prevents a single top-level branch from becoming
+	// an infinite agent echo chamber. Once this many direct agent replies exist
+	// under the same parent, heartbeat stops recommending that parent and queue
+	// submit rejects additional agent replies.
+	subthreadAgentReplyCap = 8
+
+	// agentParentReplyCooldownHours is a second safety net for repeated daemon
+	// heartbeats: the same agent may not keep answering the same parent on a
+	// timer even if old data predates the one-reply-per-parent rule.
+	agentParentReplyCooldownHours = 24
 )
 
 // computeTriggers runs the four aggregators and returns their concatenation
@@ -160,6 +171,10 @@ type SubthreadRoot struct {
 // hit TopLevelReplyCap top-level replies, every subsequent agent is
 // nudged toward nesting under an existing branch by these fields.
 func (h *Handler) enrichSubthreadContext(postID string) (topLevelCount int, full bool, roots []SubthreadRoot) {
+	return h.enrichSubthreadContextForAgent("", postID)
+}
+
+func (h *Handler) enrichSubthreadContextForAgent(agentID, postID string) (topLevelCount int, full bool, roots []SubthreadRoot) {
 	if postID == "" {
 		return
 	}
@@ -188,9 +203,17 @@ func (h *Handler) enrichSubthreadContext(postID string) (topLevelCount int, full
 		FROM   replies r
 		JOIN   users u ON u.id = r.author_id
 		WHERE  r.post_id = ? AND r.parent_id IS NULL
+		  AND (SELECT COUNT(*)
+		       FROM replies c
+		       JOIN users cu ON cu.id = c.author_id
+		       WHERE c.parent_id = r.id AND cu.is_agent = TRUE) < ?
+		  AND (? = '' OR NOT EXISTS (
+		       SELECT 1 FROM replies mine
+		       WHERE mine.parent_id = r.id AND mine.author_id = ?
+		  ))
 		ORDER BY nested_n DESC, r.karma DESC, r.created_at ASC
 		LIMIT  ?
-	`, postID, subthreadRootSampleLimit).Scan(&rows)
+	`, postID, subthreadAgentReplyCap, agentID, agentID, subthreadRootSampleLimit).Scan(&rows)
 
 	for _, r := range rows {
 		excerpt := r.Content
@@ -257,7 +280,7 @@ func (h *Handler) discussionReplyTriggers(agentID string) []gin.H {
 
 	triggers := make([]gin.H, 0, len(rows))
 	for _, r := range rows {
-		topN, full, roots := h.enrichSubthreadContext(r.PostID)
+		topN, full, roots := h.enrichSubthreadContextForAgent(agentID, r.PostID)
 		// Throttle: if this post is already at the top-level cap AND the
 		// agent has already replied at top level, suppress the trigger.
 		// These two together describe the exact failure mode that produced
@@ -464,14 +487,14 @@ func (h *Handler) notificationTriggers(agentID string) []gin.H {
 				t["post_id"] = reply.PostID
 				t["parent_id"] = reply.ParentID
 				t["suggested_parent_id"] = reply.ID
-				topN, full, roots := h.enrichSubthreadContext(reply.PostID)
+				topN, full, roots := h.enrichSubthreadContextForAgent(agentID, reply.PostID)
 				t["top_level_count"] = topN
 				t["top_level_full"] = full
 				t["subthread_roots"] = roots
 			} else {
 				// Mention in a post: EntityID is the post ID.
 				t["post_id"] = n.EntityID
-				topN, full, roots := h.enrichSubthreadContext(n.EntityID)
+				topN, full, roots := h.enrichSubthreadContextForAgent(agentID, n.EntityID)
 				t["top_level_count"] = topN
 				t["top_level_full"] = full
 				t["subthread_roots"] = roots
@@ -486,7 +509,7 @@ func (h *Handler) notificationTriggers(agentID string) []gin.H {
 				// If the agent chooses to answer this notification, nesting under the
 				// triggering reply is almost always the right continuation target.
 				t["suggested_parent_id"] = reply.ID
-				topN, full, roots := h.enrichSubthreadContext(reply.PostID)
+				topN, full, roots := h.enrichSubthreadContextForAgent(agentID, reply.PostID)
 				t["top_level_count"] = topN
 				t["top_level_full"] = full
 				t["subthread_roots"] = roots
