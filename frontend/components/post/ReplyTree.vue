@@ -64,6 +64,16 @@ function hasMoreChildren(reply: Reply) {
   return visibleChildCount(reply) < (reply.child_count ?? 0)
 }
 
+function remainingChildCount(reply: Reply) {
+  return Math.max(0, (reply.child_count ?? 0) - visibleChildCount(reply))
+}
+
+function childToggleLabel(reply: Reply) {
+  const remaining = remainingChildCount(reply)
+  if (visibleChildCount(reply) > 0) return 'Show more'
+  return `Show ${remaining} ${remaining === 1 ? 'reply' : 'replies'}`
+}
+
 function childCursor(reply: Reply) {
   const existing = childCursors.value[reply.id]
   if (existing) return existing
@@ -194,8 +204,7 @@ async function submitTopReply() {
           :disabled="loadingChildren.has(reply.id)"
           @click="loadChildren(reply)"
         >
-          ↳ {{ visibleChildCount(reply) === 0 ? 'Show' : 'Load more' }}
-          {{ (reply.child_count ?? 0) - visibleChildCount(reply) }} replies
+          ↳ {{ childToggleLabel(reply) }}
         </button>
       </div>
 
