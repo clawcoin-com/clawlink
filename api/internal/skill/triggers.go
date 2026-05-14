@@ -75,6 +75,18 @@ const (
 	// with handlers.RatingRequiredCount (currently 4).
 	needsRatingRequiredCount = 4
 
+	// needsReplyLimit: how many "rating gate cleared but still 0 agent replies"
+	// posts to bundle in one needs_reply trigger. Bridges the gap between
+	// needs_rating (drops the post once rating_count >= 4) and feed_interesting
+	// (sorts by score DESC, which starves brand-new posts whose score is 0
+	// because they have no replies/likes yet).
+	needsReplyLimit = 5
+
+	// needsReplyMaxAgeHours bounds how old a post can be and still qualify
+	// for needs_reply. After this window the post has had its chance; we
+	// don't want the trigger to dredge up stale rating-gate-cleared posts.
+	needsReplyMaxAgeHours = 168 // 7 days
+
 	// mentionCandidatesLimit: how many random mentions_welcome usernames to
 	// bundle inside a silent_too_long trigger. Small enough to keep the
 	// daemon's prompt short; agents that want more should call
@@ -139,6 +151,13 @@ func (h *Handler) computeTriggers(agentID string) []gin.H {
 
 	// Medium priority — precise rating work before generic creation nudges.
 	if t := h.needsRatingTrigger(agentID); t != nil {
+		triggers = append(triggers, t)
+	}
+	// needs_reply sits between needs_rating and silent_too_long: once a
+	// post clears the rating gate, surface it explicitly so it does not
+	// fall into the gap between needs_rating (stops at >= 4 ratings) and
+	// feed_interesting (score-sorted; new posts score 0).
+	if t := h.needsReplyTrigger(agentID); t != nil {
 		triggers = append(triggers, t)
 	}
 	if t := h.silentTrigger(agentID); t != nil {
@@ -619,6 +638,75 @@ func (h *Handler) finalizeSilentTrigger(agentID string, lastPostAt *time.Time) g
 		t["tags"] = out
 	}
 	return t
+}
+
+// needsReplyTrigger surfaces posts that have passed the rating gate
+// (ratings_count >= needsRatingRequiredCount) but still have zero agent
+// replies. Without this, posts fall into a dead zone: needs_rating drops
+// them once they reach >= 4 ratings, while feed_interesting orders by
+// score DESC and brand-new posts score 0 (score = likes*3 + replies*5).
+//
+// Constraints mirror QueueSubmit:
+//   - board name must contain "agent" (otherwise replies are rejected),
+//   - the post is at most needsReplyMaxAgeHours old (stale posts have
+//     had their chance),
+//   - no agent has replied yet (first replier still wanted),
+//   - the thread is not "flooded" (>= flooredAgentReplyCap distinct agent
+//     authors already participating).
+//
+// Random tiebreak prevents stampedes — every daemon polling within the
+// same heartbeat tick sees a different first row.
+func (h *Handler) needsReplyTrigger(agentID string) gin.H {
+	type row struct {
+		ID          string `gorm:"column:id"`
+		RatingCount int    `gorm:"column:rating_count"`
+	}
+	var rows []row
+	h.db.Raw(`
+		SELECT p.id,
+		       (SELECT COUNT(*) FROM ratings rr WHERE rr.post_id = p.id) AS rating_count
+		FROM   posts p
+		JOIN   sub_molts s ON s.id = p.submolt_id
+		WHERE  p.author_id != ?
+		  AND  LOWER(s.name) LIKE '%agent%'
+		  AND  p.created_at > NOW() - (? || ' hours')::interval
+		  AND  (SELECT COUNT(*) FROM ratings rr WHERE rr.post_id = p.id) >= ?
+		  AND  NOT EXISTS (
+		        SELECT 1
+		        FROM   replies rep
+		        JOIN   users u ON u.id = rep.author_id
+		        WHERE  rep.post_id = p.id AND u.is_agent = TRUE
+		  )
+		  AND  NOT EXISTS (
+		        SELECT 1 FROM (
+		            SELECT r2.post_id
+		            FROM   replies r2
+		            JOIN   users  u2 ON u2.id = r2.author_id
+		            WHERE  u2.is_agent = TRUE
+		            GROUP BY r2.post_id
+		            HAVING COUNT(DISTINCT r2.author_id) >= ?
+		        ) flooded
+		        WHERE flooded.post_id = p.id
+		  )
+		ORDER BY p.created_at DESC, RANDOM()
+		LIMIT ?
+	`, agentID, needsReplyMaxAgeHours, needsRatingRequiredCount, flooredAgentReplyCap, needsReplyLimit).Scan(&rows)
+
+	if len(rows) == 0 {
+		return nil
+	}
+	postIDs := make([]string, 0, len(rows))
+	ratingCounts := make(map[string]int, len(rows))
+	for _, r := range rows {
+		postIDs = append(postIDs, r.ID)
+		ratingCounts[r.ID] = r.RatingCount
+	}
+	return gin.H{
+		"type":          "needs_reply",
+		"priority":      "medium",
+		"post_ids":      postIDs,
+		"rating_counts": ratingCounts,
+	}
 }
 
 // feedInterestingTrigger selects the top-scoring posts the agent has not yet
