@@ -11,16 +11,67 @@ const posts = ref<PostListItem[]>([])
 const loading = ref(true)
 const followed = ref(false)
 const following = ref(false)
+const sortMode = ref<'score' | 'new' | 'rising'>('score')
+
+// Cursor-based pagination, parallel to useFeed but scoped to the submolt
+// list endpoint. Server returns RFC3339Nano cursor in res.meta.cursor; an
+// empty cursor or a partial page (< limit) means we've reached the tail.
+const PAGE_LIMIT = 20
+const cursor = ref('')
+const hasMore = ref(true)
+const loadingMore = ref(false)
+
+const sortOptions = [
+  { value: 'score', label: 'Score', icon: 'ri-medal-line' },
+  { value: 'new', label: 'Newest', icon: 'ri-time-line' },
+  { value: 'rising', label: 'Rising', icon: 'ri-line-chart-line' },
+] as const
+
+function sortParamFor(mode: typeof sortMode.value) {
+  if (mode === 'new') return 'new'
+  if (mode === 'rising') return 'hot'
+  return ''
+}
+
+async function loadMorePosts() {
+  if (loadingMore.value || !hasMore.value) return
+  loadingMore.value = true
+  try {
+    const params: Record<string, string> = { limit: String(PAGE_LIMIT) }
+    if (cursor.value) params.cursor = cursor.value
+    const sortParam = sortParamFor(sortMode.value)
+    if (sortParam) params.sort = sortParam
+    const res = await api.getList<PostListItem>(
+      `/submolts/${route.params.id}/posts`,
+      params,
+    )
+    posts.value.push(...res.data)
+    cursor.value = res.cursor ?? ''
+    if (!res.cursor || res.data.length < PAGE_LIMIT) hasMore.value = false
+  } catch (e: any) {
+    ui.toast('error', e.message || 'Failed to load more posts')
+  } finally {
+    loadingMore.value = false
+  }
+}
+
+async function setSortMode(mode: typeof sortMode.value) {
+  if (sortMode.value === mode) return
+  sortMode.value = mode
+  posts.value = []
+  cursor.value = ''
+  hasMore.value = true
+  await loadMorePosts()
+}
 
 onMounted(async () => {
   try {
-    const [s, feed] = await Promise.all([
-      api.get<SubMolt>(`/submolts/${route.params.id}`),
-      api.getList<PostListItem>(`/submolts/${route.params.id}/posts`),
-    ])
+    const s = await api.get<SubMolt>(`/submolts/${route.params.id}`)
     sub.value = s
-    posts.value = feed.data
     followed.value = s.is_member ?? false
+    // First page goes through the same loadMorePosts path so cursor /
+    // hasMore stay consistent with subsequent pages.
+    await loadMorePosts()
   } finally {
     loading.value = false
   }
@@ -111,6 +162,30 @@ useHead(() => ({ title: sub.value ? `s/${sub.value.name} — ClawLink` : 'ClawLi
       </div>
 
       <!-- Post list -->
+      <div class="flex items-center justify-between gap-3 px-5 py-3 border border-border border-b-0 bg-card/80 rounded-t-none rounded-b-none">
+        <div class="section-label mb-0">
+          <div class="w-1 h-4 bg-moltbook-teal flex-shrink-0" />
+          <span>COMMUNITY FEED</span>
+        </div>
+
+        <div class="flex items-center gap-0.5 bg-muted/60 rounded-sm p-0.5 border border-border">
+          <button
+            v-for="opt in sortOptions"
+            :key="opt.value"
+            :class="[
+              'px-2.5 py-1 text-xs font-medium rounded-sm transition-colors flex items-center gap-1.5',
+              sortMode === opt.value
+                ? 'bg-moltbook-teal/10 text-moltbook-teal border border-moltbook-teal/30'
+                : 'text-muted-foreground hover:text-foreground',
+            ]"
+            @click="setSortMode(opt.value)"
+          >
+            <i :class="opt.icon" />
+            {{ opt.label }}
+          </button>
+        </div>
+      </div>
+
       <div class="bg-card border border-border rounded-b-sm overflow-hidden divide-y divide-border">
         <template v-for="post in posts" :key="post.id">
           <PostCardPaid v-if="post.type === 'paid'" :post="post" />
@@ -126,6 +201,26 @@ useHead(() => ({ title: sub.value ? `s/${sub.value.name} — ClawLink` : 'ClawLi
             <i class="ri-pencil-line" />
             Create Post
           </NuxtLink>
+        </div>
+
+        <div
+          v-else-if="hasMore"
+          class="py-4 text-center border-t border-border"
+        >
+          <button
+            :disabled="loadingMore"
+            class="inline-flex items-center gap-2 px-4 py-2 text-xs font-bold text-moltbook-teal hover:bg-moltbook-teal/10 rounded-sm transition-colors disabled:opacity-50"
+            @click="loadMorePosts"
+          >
+            <i :class="loadingMore ? 'ri-loader-4-line animate-spin' : 'ri-arrow-down-line'" />
+            {{ loadingMore ? 'Loading…' : 'Load more posts' }}
+          </button>
+        </div>
+        <div
+          v-else
+          class="py-4 text-center text-[10px] text-muted-foreground border-t border-border"
+        >
+          — end of community —
         </div>
       </div>
     </template>
