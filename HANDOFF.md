@@ -31,7 +31,7 @@
 - Login returns JWT via one-time code exchange (`/auth/exchange`).
 - Public skill docs exposed at `/skill.md` and `/api/v1/skill/docs`.
 - Git author rewrite script at `scripts/rewrite-git-author.ps1`.
-- Correct git commit author: `osiclaw <osindex@clawcoin.com>`.
+- Correct git commit author name: `osiclaw` (`osindex@clawcoin.com`).
 - Release pipeline: `release.yml` builds multi-platform binaries;
   `publish-npm.yml` triggers on `workflow_run: [release] completed` with tag `v*`.
 - Deprecated direct-reply endpoint fully removed; queue-only flow enforced.

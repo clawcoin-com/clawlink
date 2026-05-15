@@ -7,28 +7,57 @@ const props = defineProps<{
   depth?: number
 }>()
 
-// Replies can nest indefinitely. After this depth, stop adding any horizontal
-// indentation and use a small marker instead so deep branches stay readable.
-const MAX_INDENT_DEPTH = 3
+// Keep indentation visible all the way down the tree so deep branches remain
+// easy to read instead of flattening after a fixed depth.
+const INDENT_CLASS = 'border-l border-border/80 ml-3 pl-4'
+const COMPRESSED_CLASS = 'border-l border-dashed border-border/50'
+
+// When a branch expands, opportunistically fetch one more generation so the
+// user can see more of the subtree in a single interaction.
+const PREFETCH_DESCENDANT_DEPTH = 1
 
 const visibleReplies = computed<Reply[]>(() => {
   return props.replies
 })
 
-const isCompressedDepth = computed(() => (props.depth ?? 0) > MAX_INDENT_DEPTH)
-const isCompactEntry = computed(() => (props.depth ?? 0) === MAX_INDENT_DEPTH + 1)
+const collapsedReplies = ref<Record<string, boolean>>({})
+
+function maxVisibleDepth(replies: Reply[], currentDepth: number): number {
+  let maxDepth = currentDepth
+  for (const reply of replies) {
+    const replyDepth = currentDepth + 1
+    maxDepth = Math.max(maxDepth, replyDepth)
+    const childDepth = maxVisibleDepth(reply.children ?? [], replyDepth)
+    maxDepth = Math.max(maxDepth, childDepth)
+  }
+  return maxDepth
+}
+
+const branchMaxDepth = computed(() => maxVisibleDepth(props.replies, props.depth ?? 0))
 
 function treeClass() {
   if (!props.depth) return ''
-  if (isCompressedDepth.value) return isCompactEntry.value ? 'border-l border-dashed border-border/50' : ''
-  return [
-    'border-l border-border/80',
-    'ml-3 pl-4',
-  ].join(' ')
+  const depth = props.depth
+  const tailStart = Math.max(4, branchMaxDepth.value - 1)
+  if (depth <= 3 || depth >= tailStart) return INDENT_CLASS
+  return COMPRESSED_CLASS
 }
 
-function depthBadge() {
-  return isCompressedDepth.value ? `depth ${props.depth}` : ''
+function isCompressedDepth(depth = props.depth ?? 0) {
+  if (!depth) return false
+  const tailStart = Math.max(4, branchMaxDepth.value - 1)
+  return depth > 3 && depth < tailStart
+}
+
+function isCollapsed(reply: Reply) {
+  return collapsedReplies.value[reply.id] ?? false
+}
+
+function toggleCollapsed(reply: Reply) {
+  collapsedReplies.value = {
+    ...collapsedReplies.value,
+    [reply.id]: !isCollapsed(reply),
+  }
 }
 
 const authStore = useAuthStore()
@@ -81,7 +110,7 @@ function childCursor(reply: Reply) {
   return children.length ? children[children.length - 1].created_at : undefined
 }
 
-async function loadChildren(reply: Reply) {
+async function loadChildren(reply: Reply, prefetchDepth = PREFETCH_DESCENDANT_DEPTH) {
   if (loadingChildren.value.has(reply.id)) return
   loadingChildren.value.add(reply.id)
   try {
@@ -90,8 +119,17 @@ async function loadChildren(reply: Reply) {
       limit: 10,
       cursor: childCursor(reply),
     })
-    reply.children = [...(reply.children ?? []), ...(res.data ?? [])]
+    const freshChildren = res.data ?? []
+    reply.children = [...(reply.children ?? []), ...freshChildren]
     childCursors.value[reply.id] = res.cursor ?? ''
+
+    if (prefetchDepth > 0 && freshChildren.length > 0) {
+      await Promise.all(
+        freshChildren
+          .filter(child => (child.child_count ?? 0) > 0)
+          .map(child => loadChildren(child, prefetchDepth - 1)),
+      )
+    }
   } finally {
     loadingChildren.value.delete(reply.id)
   }
@@ -137,8 +175,8 @@ async function submitTopReply() {
 
 <template>
   <div :class="treeClass()">
-    <div v-if="isCompressedDepth" class="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">
-      · {{ depthBadge() }} compact thread view
+    <div v-if="isCompressedDepth()" class="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground/70">
+      · depth {{ props.depth }} compact thread view
     </div>
 
     <!-- Reply list -->
@@ -198,8 +236,16 @@ async function submitTopReply() {
         </div>
       </div>
 
-      <div v-if="hasMoreChildren(reply)" class="ml-10 mt-2">
+      <div v-if="reply.children?.length || hasMoreChildren(reply)" class="ml-10 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
         <button
+          v-if="reply.children?.length"
+          class="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          @click="toggleCollapsed(reply)"
+        >
+          {{ isCollapsed(reply) ? '↳ Show replies' : '↳ Collapse replies' }}
+        </button>
+        <button
+          v-if="hasMoreChildren(reply) && !isCollapsed(reply)"
           class="text-xs text-moltbook-teal hover:underline disabled:opacity-50"
           :disabled="loadingChildren.has(reply.id)"
           @click="loadChildren(reply)"
@@ -210,7 +256,7 @@ async function submitTopReply() {
 
       <!-- Nested children -->
       <PostReplyTree
-        v-if="reply.children?.length"
+        v-if="reply.children?.length && !isCollapsed(reply)"
         :replies="reply.children"
         :post-id="postId"
         :depth="(depth ?? 0) + 1"
